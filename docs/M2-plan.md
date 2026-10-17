@@ -12,7 +12,7 @@ Decisions and invariants are in `../CLAUDE.md`. The design is `../RockPlex-Media
 
 ```
 src/
-  RockPlex.Core/     + TagSet, TagMapper, DevicePathBuilder, FlacStreamInfo (pure; still no packages, no I/O)
+  RockPlex.Core/     + TagSet, TagPolicy, TagMapper, DevicePathBuilder, FlacStreamInfo (pure; still no packages, no I/O)
   RockPlex.Plex/     + downloads, album/artist detail, art download
   RockPlex.Media/    NEW  net10.0-windows: TagLibSharp, ffmpeg runner, WIC art encoder, pipeline, cache
   RockPlex.App/      + Test export command, ffmpeg settings, export report
@@ -28,15 +28,41 @@ New package: **TagLibSharp** (LGPL-2.1, used as an unmodified library). **No ffm
 ## 2. RockPlex.Core (pure)
 
 - **`TagSet`** (record): Title, Artist, AlbumArtist, Album, TrackNumber?, TrackTotal?, DiscNumber?, DiscTotal?, Date?, Genre?, Grouping?, Compilation, Label?, Composer?, MusicBrainzTrackId?, ReplayGain? (track/album gain and peak), RockPlexRatingKey, RockPlexGuid, RockPlexPartId. Plus `ContentHash()`, a stable hash of everything written. M3 uses it to detect tag-only changes.
-- **`TagMapper.Map(TrackItem, AlbumDetail, ArtistDetail?, TagOptions) → TagSet`**, following the table in pipeline §4.2:
+- **`TagPolicy`** (record; D4): one switch **per tag field** saying whether it is written. Every field the iPod could show is covered, so any of them can be stripped when its data is junk:
+
+  | Field | Source | Default |
+  |---|---|---|
+  | Title | Plex | Write |
+  | Artist (track artist) | Plex | Write |
+  | Album artist | Plex | Write |
+  | Album | Plex | Write |
+  | Track number | Plex | Write |
+  | Track total | Plex | Write |
+  | Disc number | Plex | Write |
+  | Disc total | Plex | Write |
+  | Date / year | Plex | Write |
+  | Genre (first Plex genre only) | Plex | Write (D1) |
+  | Grouping (first Plex style) | Plex | Strip |
+  | Compilation flag | Plex | Write |
+  | Label (studio) | Plex | Strip (Rockbox ignores it) |
+  | MusicBrainz track ID | Plex | Write (helps scrobble matching later) |
+  | Composer | **Kept from the original file** | Keep (D3) |
+  | Comment | **Kept from the original file** | Strip |
+
+  - Every field can be switched off, including the core ones (title, artist, album, album artist, track number). Switching off a core field shows a warning in Settings, because Rockbox's database then files those tracks under *&lt;Untagged&gt;*.
+  - **Not user-facing and always written:** `ROCKPLEX_RATINGKEY`, `ROCKPLEX_GUID`, `ROCKPLEX_PARTID`. M3 rebuilds the manifest from them and M4 maps plays back to Plex through them, so stripping them would break syncing. Rockbox ignores them.
+  - "Strip" means the field is absent from the file, never written as an empty value. Since every sync wipes all tags first, a field switched off later disappears from the iPod copies at the next sync.
+  - The policy is part of `TagSet.ContentHash()`, so changing a switch makes M3 re-tag the affected files (tags only; no audio is copied again).
+- **`TagMapper.Map(TrackItem, AlbumDetail, ArtistDetail?, SourceTags, TagPolicy) → TagSet`**, following the table in pipeline §4.2. Fields the policy strips are left null:
   - `ARTIST` = `originalTitle`, else the album artist. `ALBUMARTIST` = the album artist only (no variant keys).
   - `DATE` = `originallyAvailableAt` (YYYY-MM-DD), else year.
-  - `GENRE` = the album's first genre (fallback: the artist's first), or **omitted entirely** when `TagOptions.Genre = None` (D1). `GROUPING` = the first style.
-  - `COMPOSER` = carried over from the source file when present (D3), passed in by Media after reading the original's tags. ReplayGain is not written (D2).
+  - `GENRE` = the album's first genre (fallback: the artist's first), never joined (D1). `GROUPING` = the first style.
+  - `COMPOSER` and `COMMENT` come from the original file's tags (`SourceTags`, read by Media before the wipe), only when the policy keeps them (D3, D4). The first non-empty value is used and trimmed. Nothing else from the original file survives. ReplayGain is never written (D2).
   - `COMPILATION=1` when the album artist is "Various Artists".
   - `TRACKTOTAL` = number of tracks on the same disc. `DISCTOTAL` = highest disc number on the album.
   - Whitespace is trimmed and empty values are dropped, never written as empty tags.
-- **`DevicePathBuilder.Build(TagSet, extension, isMultiDisc) → string`**: `/Music/<AlbumArtist>/<Year> - <Album>/<Disc>-<Track:00> <Title>.<ext>`.
+- **`DevicePathBuilder.Build(PathFields, extension, isMultiDisc) → string`**: `/Music/<AlbumArtist>/<Year> - <Album>/<Disc>-<Track:00> <Title>.<ext>`.
+  - Paths are built from the **Plex values directly, regardless of `TagPolicy`**: stripping Date or Album artist from the tags doesn't change the folder layout. A missing value falls back to `Unknown Artist`, `Unknown Album` or no year prefix.
   - FAT32 sanitising: replace `\ / : * ? " < > |` and control characters, strip trailing dots and spaces, avoid reserved names (`CON`, `NUL`, …), cap each segment at about 120 UTF-16 units and the whole path at 240.
   - Unicode is normalised to NFC, so "Sigur Rós" is always the same bytes. 🔬 UTF-8 path behaviour on the device is still on the spike list.
   - Collision handling (`[2]`, edition labels) is part of M3, because it needs the manifest.
@@ -92,14 +118,15 @@ Clean slate, then one canonical set:
 - **Test export…** button (enabled when something is selected): pick a folder → process the selected tracks → write `<folder>\Music\…` plus `cover.jpg` per album, a `RockPlex-export.txt` report (per track: copied / converted 24/96 → 16/44.1 / re-encoded / not re-tagged / failed + reason), and `.m3u8` copies of the selected playlists so the spike tests can check them.
 - **Refuses the iPod's drive** (any drive with `.rockbox`): the manifest rule means only M3's sync engine may write there. You copy the test files across by hand.
 - Progress: overall bar, current track, and a Cancel button. Errors are listed, never shown one dialog per track.
-- Settings: ffmpeg path (with a "Detect" button and a status line such as "ffmpeg 9.0.2 with soxr ✓"), the conversion-cache cap, and **Genre: first only / none** (D1).
+- Settings: ffmpeg path (with a "Detect" button and a status line such as "ffmpeg 9.0.2 with soxr ✓") and the conversion-cache cap.
+- **Tags written to the iPod** (D4): a checklist with one row per `TagPolicy` field, in two groups ("From Plex" and "Kept from the original file"), plus **Restore defaults**. Switching off a core field shows the *&lt;Untagged&gt;* warning inline. A note explains that RockPlex's own ID tags are always written. Saved in `settings.json`; the Test export report lists the policy that was used.
 - The capacity summary shows **real** sizes for anything already in the conversion cache.
 
 ## 6. Tests
 
-- **Core:** TagMapper (artist fallback, compilation, date fallback, totals per disc, empty values dropped, genre first-only vs none, composer carry-over, no ReplayGain keys); DevicePathBuilder (illegal characters, reserved names, trailing dots, length caps, NFC, multi-disc prefix); FlacStreamInfo (fixture headers, a truncated header, not-FLAC); FinalFormatPolicy (the full M1 matrix plus the block-size rule; property check that nothing is ever raised).
+- **Core:** TagMapper (artist fallback, compilation, date fallback, totals per disc, empty values dropped, every TagPolicy switch on and off (a stripped field is absent, not empty), genre never joined, composer/comment carry-over only when kept, identity tags written even with every switch off, policy change → different ContentHash, no ReplayGain keys); DevicePathBuilder (illegal characters, reserved names, trailing dots, length caps, NFC, multi-disc prefix); FlacStreamInfo (fixture headers, a truncated header, not-FLAC); FinalFormatPolicy (the full M1 matrix plus the block-size rule; property check that nothing is ever raised).
 - **Plex:** download writes the exact bytes and sends the token in the header only; size mismatch throws; album/artist detail mapping; guids and gain parsing.
-- **Media (unit):** TagWriter on tiny committed fixtures (FLAC, MP3, M4A) that start out *messy* (duplicate ARTIST, ID3 glued onto FLAC, three pictures) → exactly one clean set and one picture afterwards; ArtProcessor produces a baseline JPEG (no SOF2 marker) of the right size and pads non-square art.
+- **Media (unit):** TagWriter on tiny committed fixtures (FLAC, MP3, M4A) that start out *messy* (duplicate ARTIST, ID3 glued onto FLAC, three pictures) → exactly one clean set and one picture afterwards, and with every policy switch off only the ROCKPLEX_* keys remain; ArtProcessor produces a baseline JPEG (no SOF2 marker) of the right size and pads non-square art.
 - **Media (integration, `[FfmpegFact]`, skipped with a reason when ffmpeg isn't found):** generated 24/96 → 16/44.1; 24/32 → 16/32 (rate kept); 16/44.1 → bit-perfect copy (audio MD5 equal); 16/22.05 → copied, never upsampled; block size 8192 → lossless re-encode with an identical MD5; cancellation kills ffmpeg and leaves no output file.
 - **Pipeline:** a fake Plex download plus real TagWriter/ArtProcessor → final file, report line, cache hit on the second run.
 
@@ -117,9 +144,10 @@ Clean slate, then one canonical set:
 
 | # | Question | Decision |
 |---|---|---|
-| D1 | **Genre** | **First Plex genre only** by default, plus a setting **"Genre: first only / none"**. With *none*, no `GENRE` tag is written at all (the owner doesn't use genres). |
+| D1 | **Genre** | **First Plex genre only**, never joined. Can be stripped entirely through D4 (the owner doesn't use genres). |
 | D2 | **ReplayGain** | **Skipped in M2.** Revisit after spike test 4 has checked Plex's units. |
-| D3 | **Carry-over allow-list** | **`COMPOSER` only**, copied from the source file when present. Everything else from the source is dropped. |
+| D3 | **Carry-over allow-list** | **`COMPOSER`** kept from the source file by default; **`COMMENT`** available but off by default. Everything else from the source is always dropped. |
+| D4 | **Per-tag stripping** | **Every tag field has its own write/strip switch** (§2 `TagPolicy`, §5 settings), because source data for many fields is junk. Only RockPlex's internal ID tags are exempt. |
 
 ## 9. Out of scope for M2
 Writing to the iPod, the manifest, collision renaming, the real `.m3u8` writer with its guarantees (M3); stats (M4); lyrics `.lrc` sidecars; computing ReplayGain locally with `rsgain`.
