@@ -41,12 +41,11 @@ public sealed partial class DeviceViewModel : ObservableObject, IDisposable
         ? $"Target \"{d.RockboxTarget ?? "unknown"}\" isn't an iPod Video (ipodvideo); other Rockbox players are untested."
         : string.Empty;
 
-    public void Start()
-    {
-        _watcher.Poll();
-        Sync();
-        _watcher.Start();
-    }
+    /// <summary>
+    /// The watcher's first scan runs straight away on a background thread. Scanning on the UI thread
+    /// would freeze the window while a spun-down iPod disk wakes up.
+    /// </summary>
+    public void Start() => _watcher.Start();
 
     public void Dispose()
     {
