@@ -1,0 +1,30 @@
+[
+  {
+    "name": "Living Room Mac",
+    "product": "Plex Media Server",
+    "productVersion": "1.41.0.0",
+    "clientIdentifier": "server-machine-1",
+    "provides": "server",
+    "owned": true,
+    "accessToken": "SECRET-SERVER-TOKEN",
+    "connections": [
+      { "protocol": "https", "address": "203.0.113.5", "port": 32400, "uri": "https://203-0-113-5.abc.plex.direct:32400", "local": false, "relay": false, "IPv6": false },
+      { "protocol": "https", "address": "192.168.1.20", "port": 32400, "uri": "https://192-168-1-20.abc.plex.direct:32400", "local": true, "relay": false, "IPv6": false },
+      { "protocol": "https", "address": "10.0.0.1", "port": 8443, "uri": "https://10-0-0-1.abc.plex.direct:8443", "local": false, "relay": true, "IPv6": false }
+    ]
+  },
+  {
+    "name": "Plex Web",
+    "clientIdentifier": "player-1",
+    "provides": "client,player",
+    "owned": true,
+    "connections": []
+  },
+  {
+    "name": "Friend's Server",
+    "clientIdentifier": "server-machine-2",
+    "provides": "server,player",
+    "owned": 0,
+    "accessToken": "SECRET-SHARED-TOKEN"
+  }
+]

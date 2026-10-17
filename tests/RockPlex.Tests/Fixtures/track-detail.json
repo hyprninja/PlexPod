@@ -1,0 +1,9 @@
+{ "MediaContainer": { "size": 1, "Metadata": [
+  {
+    "ratingKey": "48211", "guid": "plex://track/5d07cdd5", "type": "track", "title": "Hoppípolla",
+    "parentRatingKey": "5530", "grandparentRatingKey": "1021", "duration": 268000, "updatedAt": 1700000000,
+    "Media": [ { "bitrate": 1950, "audioChannels": 2, "audioCodec": "flac", "container": "flac",
+      "Part": [ { "id": 9001, "key": "/library/parts/9001/1700000000/file.flac", "size": 65400000, "container": "flac",
+        "Stream": [ { "id": 1, "streamType": 2, "codec": "flac", "channels": 2, "bitDepth": 24, "samplingRate": 96000, "gain": "-7.2", "peak": "0.98" } ] } ] } ]
+  }
+] } }

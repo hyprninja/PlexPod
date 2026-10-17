@@ -1,0 +1,5 @@
+{ "MediaContainer": { "size": 3, "totalSize": 3, "Metadata": [
+  { "ratingKey": "70001", "key": "/playlists/70001/items", "guid": "com.plexapp.agents.none://a1", "type": "playlist", "title": "Road Trip", "smart": true, "playlistType": "audio", "leafCount": 142, "duration": 31000000 },
+  { "ratingKey": "70002", "key": "/playlists/70002/items", "guid": "com.plexapp.agents.none://a2", "type": "playlist", "title": "Holiday Videos", "smart": false, "playlistType": "video", "leafCount": 3, "duration": 1000 },
+  { "ratingKey": "70003", "key": "/playlists/70003/items", "guid": "com.plexapp.agents.none://a3", "type": "playlist", "title": "Chill", "smart": 0, "playlistType": "audio", "leafCount": 4, "duration": 900000 }
+] } }

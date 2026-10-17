@@ -1,0 +1,10 @@
+{ "MediaContainer": { "size": 5, "totalSize": 5, "Metadata": [
+  { "playlistItemID": 501, "ratingKey": "48212", "guid": "plex://track/5d07cdd6", "type": "track", "title": "Glósóli", "parentRatingKey": "5530", "grandparentRatingKey": "1021",
+    "Media": [ { "audioCodec": "mp3", "container": "mp3", "Part": [ { "id": 9002, "key": "/library/parts/9002/1/file.mp3", "size": 15000000 } ] } ] },
+  { "playlistItemID": 502, "ratingKey": "48211", "guid": "plex://track/5d07cdd5", "type": "track", "title": "Hoppípolla", "parentRatingKey": "5530", "grandparentRatingKey": "1021",
+    "Media": [ { "audioCodec": "flac", "container": "flac", "Part": [ { "id": 9001, "key": "/library/parts/9001/1/file.flac", "size": 65400000 } ] } ] },
+  { "playlistItemID": 503, "ratingKey": "48212", "guid": "plex://track/5d07cdd6", "type": "track", "title": "Glósóli", "parentRatingKey": "5530", "grandparentRatingKey": "1021",
+    "Media": [ { "audioCodec": "mp3", "container": "mp3", "Part": [ { "id": 9002, "key": "/library/parts/9002/1/file.mp3", "size": 15000000 } ] } ] },
+  { "playlistItemID": 504, "ratingKey": "60000", "type": "clip", "title": "Music video" },
+  { "playlistItemID": 505, "ratingKey": "48213", "guid": "plex://track/5d07cdd7", "type": "track", "title": "Missing File", "parentRatingKey": "5530", "grandparentRatingKey": "1021" }
+] } }

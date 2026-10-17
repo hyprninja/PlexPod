@@ -1,0 +1,5 @@
+{ "MediaContainer": { "size": 3, "Directory": [
+  { "key": "1", "type": "movie", "title": "Movies", "uuid": "m-1" },
+  { "key": "3", "type": "artist", "title": "Music", "uuid": "music-uuid" },
+  { "key": 7, "type": "artist", "title": "Hi-Res", "uuid": "hires-uuid" }
+] } }
