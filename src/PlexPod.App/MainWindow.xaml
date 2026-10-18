@@ -178,6 +178,9 @@
                 <Button DockPanel.Dock="Right" Content="Stop" Command="{Binding Sync.SyncCancelCommand}" Margin="8,0,0,0"
                         ToolTip="Finishes the file being copied, then stops. The iPod stays consistent."
                         Visibility="{Binding Sync.SyncCommand.IsRunning, Converter={StaticResource VisibleWhen}}" />
+                <Button DockPanel.Dock="Right" Content="Stop" Command="{Binding Sync.SendPlaysNowCancelCommand}" Margin="8,0,0,0"
+                        ToolTip="Stops sending. Plays already sent are recorded; the rest go next time."
+                        Visibility="{Binding Sync.SendPlaysNowCommand.IsRunning, Converter={StaticResource VisibleWhen}}" />
                 <StackPanel>
                     <ProgressBar Height="4" Minimum="0" Maximum="1" Value="{Binding Sync.ProgressValue, Mode=OneWay}"
                                  Visibility="{Binding Sync.SyncCommand.IsRunning, Converter={StaticResource VisibleWhen}}" />

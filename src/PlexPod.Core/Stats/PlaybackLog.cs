@@ -10,13 +10,24 @@ namespace PlexPod.Core.Stats;
 /// </summary>
 public sealed record PlaybackLogEntry(long Timestamp, long ElapsedMs, long LengthMs, string DevicePath, long EndOffset)
 {
+    /// <summary>Plausible play times: 2000–2100. Outside that the iPod's clock was unset or the line is corrupt.</summary>
+    public const long EarliestTimestamp = 946_684_800;
+
+    public const long LatestTimestamp = 4_102_444_800;
+
     /// <summary>
     /// The iPod's clock has no time zone, so its timestamps are local wall-clock time; this reads them in
-    /// <paramref name="zone"/> (normally the PC's).
+    /// <paramref name="zone"/> (normally the PC's). Null when the timestamp isn't plausible: the play
+    /// still counts, it just has no time (a corrupt line must never stop plays being sent).
     /// </summary>
-    public DateTimeOffset PlayedAt(TimeZoneInfo zone)
+    public DateTimeOffset? PlayedAt(TimeZoneInfo zone)
     {
         ArgumentNullException.ThrowIfNull(zone);
+        if (Timestamp is < EarliestTimestamp or > LatestTimestamp)
+        {
+            return null;
+        }
+
         var wallClock = DateTime.SpecifyKind(DateTime.UnixEpoch.AddSeconds(Timestamp), DateTimeKind.Unspecified);
         return new DateTimeOffset(wallClock, zone.GetUtcOffset(wallClock));
     }

@@ -33,6 +33,17 @@ public sealed class SyncPlannerTests
         SyncPlanner.Plan(manifest, targets, playlists ?? [], userFiles ?? [], t => t.TrackArtist ?? "Artist");
 
     [Fact]
+    public void FitCheck_ARemovalAKeptPlaylistStillNames_FreesNothing()
+    {
+        var kept = new ManifestTrack { DevicePath = "/Music/a.flac", DesiredPath = "/Music/a.flac", RatingKey = "1", SizeBytes = 5_000 };
+        var gone = new ManifestTrack { DevicePath = "/Music/b.flac", DesiredPath = "/Music/b.flac", RatingKey = "2", SizeBytes = 3_000 };
+        var plan = new SyncPlan([], [kept, gone], [], []);
+
+        Assert.Equal(8_000, FitCheck.Evaluate(plan, 1L << 40).BytesFreed);
+        Assert.Equal(3_000, FitCheck.Evaluate(plan, 1L << 40, keptPaths: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "/MUSIC/a.flac" }).BytesFreed);
+    }
+
+    [Fact]
     public void EmptyDevice_AddsEverything()
     {
         var plan = Plan(Manifest(), [Target("t1", "/Music/A/2000 - B/01 One.flac"), Target("t2", "/Music/A/2000 - B/02 Two.flac")]);

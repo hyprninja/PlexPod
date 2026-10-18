@@ -345,6 +345,65 @@ public sealed class SyncEngineTests : IDisposable
     }
 
     [FfmpegFact]
+    public async Task Stock_PlayCountsLeftBehind_AreNeverCountedTwice()
+    {
+        MakeStock();
+        await LibraryAsync();
+        await StockSyncAsync(Select(albumA: true));
+        var counts = PlayCountsReader.Write([.. Database().Tracks.Select(t => new PlayCountEntry(
+            t.Track.Title == "Glósóli" ? 3u : 0u, new DateTime(2026, 10, 18, 8, 0, 0), 0, null, 0, null))]);
+        File.WriteAllBytes(Local(PlexPod.Device.Sync.DevicePaths.PlayCountsPath), counts);
+        await StockSyncAsync(Select(albumA: true), stats: StatsOn);
+        Assert.Equal(["play:t1", "play:t1", "play:t1"], _client.Writes);
+
+        // The same file is back, as if deleting it had failed (locked) or the sync had stopped first.
+        File.WriteAllBytes(Local(PlexPod.Device.Sync.DevicePaths.PlayCountsPath), counts);
+        var preview = await Engine().PreviewAsync(await RequestAsync(Select(albumA: true), stats: StatsOn, firmware: Stock), CancellationToken.None);
+        Assert.Equal((0, 0), preview.StockStats);
+        await Engine().ExecuteAsync(preview, null, CancellationToken.None);
+
+        Assert.Equal(3, _client.Writes.Count);
+        Assert.Equal(3u, Database().Tracks.Single(t => t.Track.Title == "Glósóli").Track.PlayCount);
+    }
+
+    [FfmpegFact]
+    public async Task Stock_UnreadablePlayCounts_IsSetAside_NotDeleted()
+    {
+        MakeStock();
+        await LibraryAsync();
+        await StockSyncAsync(Select(albumA: true));
+        var garbage = "mhdp\u0010\0\0\0 not really"u8.ToArray();
+        File.WriteAllBytes(Local(PlexPod.Device.Sync.DevicePaths.PlayCountsPath), garbage);
+
+        var result = await StockSyncAsync(Select(albumA: true), stats: StatsOn);
+
+        Assert.True(result.Completed, string.Join("\n", result.Failures));
+        Assert.False(File.Exists(Local(PlexPod.Device.Sync.DevicePaths.PlayCountsPath)));
+        Assert.Equal(garbage, File.ReadAllBytes(Local(PlexPod.Device.Sync.DevicePaths.PlayCountsBackupPath)));
+        Assert.Contains(result.Warnings, w => w.Contains("Play Counts.plexpod-bak", StringComparison.Ordinal));
+        Assert.Empty(_client.Writes);
+        AssertStockLibraryIsSound();
+    }
+
+    [FfmpegFact]
+    public async Task Stock_PlayCountsWithoutADatabase_IsSetAside()
+    {
+        MakeStock();
+        await LibraryAsync();
+        await StockSyncAsync(Select(albumA: true));
+        var counts = PlayCountsReader.Write([new PlayCountEntry(5, null, 0, null, 0, null), new PlayCountEntry(1, null, 0, null, 0, null)]);
+        File.WriteAllBytes(Local(PlexPod.Device.Sync.DevicePaths.PlayCountsPath), counts);
+        File.Delete(Local(PlexPod.Device.Sync.DevicePaths.ItunesDbPath));
+
+        var result = await StockSyncAsync(Select(albumA: true), stats: StatsOn);
+
+        Assert.True(result.Completed, string.Join("\n", result.Failures));
+        Assert.Equal(counts, File.ReadAllBytes(Local(PlexPod.Device.Sync.DevicePaths.PlayCountsBackupPath)));
+        Assert.Empty(_client.Writes); // positions can't be matched: nothing is guessed
+        AssertStockLibraryIsSound();
+    }
+
+    [FfmpegFact]
     public async Task Stock_PlexDown_PlaysWaitAndAreSentNextTime()
     {
         MakeStock();
@@ -1076,6 +1135,45 @@ public sealed class SyncEngineTests : IDisposable
         File.AppendAllText(RockboxFile("playback.log"), Play(PathA2) + "\n");
         await SyncAsync(Select(albumA: true, albumB: true), stats: StatsOn);
         Assert.Equal(["play:t1", "play:t3", "play:t2"], _client.Writes);
+    }
+
+    [FfmpegFact]
+    public async Task Stats_CorruptTimestamp_DoesntStopTheSync_AndThePlayCounts()
+    {
+        await LibraryAsync();
+        await SyncAsync(Select(albumA: true, albumB: true));
+        WriteLog("playback.log", Play(PathA1, at: 123_456_789_012_345), Play(PathB1));
+
+        var result = await SyncAsync(Select(albumA: true, albumB: true), stats: StatsOn);
+
+        Assert.True(result.Completed, string.Join("\n", result.Failures));
+        Assert.Equal(["play:t1", "play:t3"], _client.Writes);
+        await SyncAsync(Select(albumA: true, albumB: true), stats: StatsOn);
+        Assert.Equal(2, _client.Writes.Count);
+    }
+
+    [FfmpegFact]
+    public async Task Stats_RotatedLogLockedRightAfterRotation_IsNotSentAgain()
+    {
+        await LibraryAsync();
+        await SyncAsync(Select(albumA: true, albumB: true));
+        WriteLog("playback.log", Play(PathA1));
+        await SyncAsync(Select(albumA: true, albumB: true), stats: StatsOn);
+
+        // Rockbox rotates the log (one more play in it first) and starts a new one...
+        File.AppendAllText(RockboxFile("playback.log"), Play(PathB1) + "\n");
+        File.Move(RockboxFile("playback.log"), RockboxFile("playback_0001.log"));
+        WriteLog("playback.log", Play(PathA2));
+
+        // ...and the rotated file can't be read during the next sync.
+        using (new FileStream(RockboxFile("playback_0001.log"), FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            await SyncAsync(Select(albumA: true, albumB: true), stats: StatsOn);
+        }
+
+        await SyncAsync(Select(albumA: true, albumB: true), stats: StatsOn);
+
+        Assert.Equal(["play:t1", "play:t2", "play:t3"], _client.Writes); // t1 never twice
     }
 
     [FfmpegFact]

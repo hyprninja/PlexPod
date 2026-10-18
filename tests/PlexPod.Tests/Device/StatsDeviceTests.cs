@@ -53,6 +53,16 @@ public sealed class StatsDeviceTests : IDisposable
     }
 
     [Fact]
+    public async Task Read_LogsBeyondTheTotalBudget_AreSkipped()
+    {
+        File.WriteAllText(Rockbox("playback_0001.log"), "# 1\n1:2:3:/x\n");
+        File.WriteAllText(Rockbox("playback.log"), "# 2\n1:2:3:/y\n");
+        var files = await StatsReader.ReadAsync(_root, CancellationToken.None, maxTotalBytes: 20);
+        Assert.Equal(["playback_0001.log"], files.Logs.Select(l => l.FileName));
+        Assert.Equal(["playback.log"], files.Skipped);
+    }
+
+    [Fact]
     public async Task Read_OversizedLog_IsSkipped()
     {
         using (var big = File.Create(Rockbox("playback.log")))

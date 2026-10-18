@@ -32,7 +32,11 @@ public sealed record FitResult(
 public static class FitCheck
 {
     /// <param name="reserveBytes">Extra room needed besides tracks and playlists (the stock firmware's database and its temp copy).</param>
-    public static FitResult Evaluate(SyncPlan plan, long freeBytes, long reserveBytes = 0)
+    /// <param name="keptPaths">
+    /// Files a playlist that survives the sync still names: the removal step keeps them (P5), so they
+    /// free nothing and are not counted.
+    /// </param>
+    public static FitResult Evaluate(SyncPlan plan, long freeBytes, long reserveBytes = 0, IReadOnlySet<string>? keptPaths = null)
     {
         ArgumentNullException.ThrowIfNull(plan);
 
@@ -62,7 +66,7 @@ public static class FitCheck
         }
 
         var needed = added + growth + largestOverwrite + PlaylistBytes(plan) + Math.Max(0, reserveBytes);
-        var freed = plan.TrackRemovals.Sum(t => t.SizeBytes);
+        var freed = plan.TrackRemovals.Where(t => keptPaths?.Contains(t.DevicePath) != true).Sum(t => t.SizeBytes);
         var usable = Math.Max(0, freeBytes - CapacityCalculator.ReserveBytes);
         var outcome = needed <= usable ? FitOutcome.Fits
             : needed <= usable + freed ? FitOutcome.FitsAfterRemovals

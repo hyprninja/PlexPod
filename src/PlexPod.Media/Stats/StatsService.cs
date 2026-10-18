@@ -45,6 +45,9 @@ public sealed class StatsService(MediaPaths paths, ILogger<StatsService> logger)
 {
     internal const int SaveEveryPlays = 10;
 
+    /// <summary>Old bookmarks kept beside the current logs' (most recent first).</summary>
+    internal const int MaxOldBookmarks = 50;
+
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     /// <summary>The iPod's clock is local time; tests pin the zone.</summary>
@@ -155,16 +158,16 @@ public sealed class StatsService(MediaPaths paths, ILogger<StatsService> logger)
         logger.LogInformation("Stats return: sent {Plays} play(s) and {Ratings} rating(s), {Waiting} waiting", plays, ratings, result.PlaysWaiting + result.RatingsWaiting);
         return result with { Lines = Lines(result, preview.Hints) };
 
-        // One bookmark per log read, plus the old ones of logs skipped this time (still unread), so
-        // the file never grows without bound and a skipped log is never re-sent from the start.
+        // One bookmark per log read, plus the most recent old ones that aren't the same: a log that
+        // couldn't be read this time (renamed by Rockbox meanwhile, or locked) keeps its bookmark, which
+        // only ever matches the exact bytes it came from, so keeping stale ones is harmless.
         Task SaveAsync()
         {
-            var skipped = preview.Files.Skipped.ToHashSet(StringComparer.OrdinalIgnoreCase);
-            var state = new StatsState
-            {
-                Bookmarks = [.. StatsPlanner.Bookmarks(preview.Files.Logs, processed), .. preview.State.Bookmarks.Where(b => skipped.Contains(b.FileName))],
-                RatingsSent = ratingsSent,
-            };
+            var current = StatsPlanner.Bookmarks(preview.Files.Logs, processed);
+            var old = preview.State.Bookmarks
+                .Where(o => !current.Any(c => c.PrefixHash == o.PrefixHash && c.ProcessedBytes == o.ProcessedBytes))
+                .Take(MaxOldBookmarks);
+            var state = preview.State with { Bookmarks = [.. current, .. old], RatingsSent = ratingsSent };
             return store.SaveStatsAsync(state, CancellationToken.None);
         }
     }
@@ -314,7 +317,7 @@ public sealed class StatsService(MediaPaths paths, ILogger<StatsService> logger)
             }
         }
 
-        public void AppendPlay(PlayStep step, DateTimeOffset playedAt) =>
+        public void AppendPlay(PlayStep step, DateTimeOffset? playedAt) =>
             Try(() =>
             {
                 var line = JsonSerializer.Serialize(new

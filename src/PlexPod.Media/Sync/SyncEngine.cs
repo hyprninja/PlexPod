@@ -157,7 +157,7 @@ public sealed class SyncEngine(
             plan = plan with { TrackRemovals = [.. plan.TrackRemovals, .. otherFirmware] };
         }
 
-        var fit = FitCheck.Evaluate(plan, FreeSpace(root), stock ? StockLibrary.DatabaseReserve(targets.Count) : 0);
+        var fit = FitCheck.Evaluate(plan, FreeSpace(root), stock ? StockLibrary.DatabaseReserve(targets.Count) : 0, StillReferenced(root, plan));
         if (fit.Outcome == FitOutcome.TooBig)
         {
             blockers.Add($"The selection doesn't fit: {Mb(fit.OverBy)} MB over, even after removals.");
@@ -191,8 +191,8 @@ public sealed class SyncEngine(
 
         progress?.Report("Reading the iPod's library…");
         var signature = StockLibrary.Signature(targets, playlists, MasterName(request));
-        var stockStats = await Task.Run(() => CountStockPlays(root, manifest, request.Stats is not null, notes), ct).ConfigureAwait(false);
         var pending = request.Stats is null ? StatsState.Empty : await store.LoadStatsAsync(ct).ConfigureAwait(false);
+        var stockStats = await Task.Run(() => CountStockPlays(root, manifest, pending, request.Stats is not null, notes), ct).ConfigureAwait(false);
         return preview with
         {
             StockPlaylists = playlists,
@@ -403,35 +403,42 @@ public sealed class SyncEngine(
         }
     }
 
+    /// <summary>The iPod's Play Counts as read for one sync.</summary>
+    /// <param name="Bytes">The file, or null when there is none.</param>
+    /// <param name="Usable">False when it couldn't be parsed or there's no database to line it up with: then it's set aside, not consumed.</param>
+    private sealed record PlayCountsRead(byte[]? Bytes, string? Sha, bool Usable, List<(ManifestTrack Owned, ItdbTrack OnIpod, PlayCountEntry Entry)> Matches);
+
     /// <summary>
     /// Lines the firmware's Play Counts up with the database it was recorded against: entry i belongs
-    /// to the database's track i. Only tracks PlexPod owns (by database id) are returned.
+    /// to the database's track i. Only tracks PlexPod owns (by database id) are matched.
     /// </summary>
-    private static List<(ManifestTrack Owned, ItdbTrack OnIpod, PlayCountEntry Entry)> MatchPlayCounts(string root, IEnumerable<ManifestTrack> owned, List<string> warnings)
+    private static PlayCountsRead ReadPlayCounts(string root, IEnumerable<ManifestTrack> owned, List<string> warnings)
     {
         var matches = new List<(ManifestTrack, ItdbTrack, PlayCountEntry)>();
         var local = DevicePaths.ToLocal(root, DevicePaths.PlayCountsPath);
         if (!File.Exists(local))
         {
-            return matches;
+            return new PlayCountsRead(null, null, false, matches);
         }
 
+        var bytes = File.ReadAllBytes(local);
+        var sha = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes));
         IReadOnlyList<PlayCountEntry> entries;
         try
         {
-            entries = PlayCountsReader.Read(File.ReadAllBytes(local));
+            entries = PlayCountsReader.Read(bytes);
         }
         catch (ItunesDbFormatException ex)
         {
-            warnings.Add($"The iPod's Play Counts file couldn't be read ({ex.Message}); its plays are lost.");
-            return matches;
+            warnings.Add($"The iPod's Play Counts file couldn't be read ({ex.Message}); it was kept as \"{Path.GetFileName(DevicePaths.PlayCountsBackupPath)}\".");
+            return new PlayCountsRead(bytes, sha, false, matches);
         }
 
         var db = TryReadDatabase(root, warnings);
         if (db is null)
         {
-            warnings.Add("The iPod has plays recorded but no database to match them to; they can't be sent.");
-            return matches;
+            warnings.Add($"The iPod has plays recorded but no database to match them to; the file was kept as \"{Path.GetFileName(DevicePaths.PlayCountsBackupPath)}\".");
+            return new PlayCountsRead(bytes, sha, false, matches);
         }
 
         var byDbid = owned.Where(t => t.Stock is not null).GroupBy(t => t.Stock!.Dbid).ToDictionary(g => g.Key, g => g.First());
@@ -446,19 +453,24 @@ public sealed class SyncEngine(
             }
         }
 
-        return matches;
+        return new PlayCountsRead(bytes, sha, true, matches);
     }
 
-    /// <summary>For the plan dialog: plays and rating changes in Play Counts (read-only).</summary>
-    private static (int Plays, int Ratings) CountStockPlays(string root, DeviceManifest manifest, bool statsOn, List<string> notes)
+    /// <summary>For the plan dialog: plays and rating changes in Play Counts not yet taken (read-only).</summary>
+    private static (int Plays, int Ratings) CountStockPlays(string root, DeviceManifest manifest, StatsState state, bool statsOn, List<string> notes)
     {
         if (!statsOn)
         {
             return (0, 0);
         }
 
-        var matches = MatchPlayCounts(root, manifest.Tracks, notes);
-        return ((int)matches.Sum(m => m.Entry.Plays), matches.Count(m => m.Entry.Rating is { } r && r != m.OnIpod.Rating));
+        var read = ReadPlayCounts(root, manifest.Tracks, notes);
+        if (!read.Usable || read.Sha == state.ConsumedPlayCounts)
+        {
+            return (0, 0);
+        }
+
+        return ((int)read.Matches.Sum(m => m.Entry.Plays), read.Matches.Count(m => m.Entry.Rating is { } r && r != m.OnIpod.Rating));
     }
 
     /// <summary>
@@ -475,47 +487,63 @@ public sealed class SyncEngine(
         var pendingPlays = new Dictionary<string, int>(state.PendingPlays, StringComparer.Ordinal);
         var pendingRatings = new Dictionary<string, int>(state.PendingRatings, StringComparer.Ordinal);
         var warnings = new List<string>();
-        var countsFile = DevicePaths.ToLocal(run.Root, DevicePaths.PlayCountsPath);
-        var hadCounts = File.Exists(countsFile);
-        foreach (var (owned, onIpod, entry) in MatchPlayCounts(run.Root, run.State.Tracks.Values.ToList(), warnings))
-        {
-            var current = run.State.Tracks.GetValueOrDefault(owned.DevicePath) ?? owned;
-            var record = current.Stock!;
-            run.State.Tracks[current.DevicePath] = current with
-            {
-                Stock = record with
-                {
-                    PlayCount = record.PlayCount + entry.Plays,
-                    LastPlayed = Later(record.LastPlayed, entry.LastPlayed),
-                    SkipCount = record.SkipCount + entry.Skips,
-                    LastSkipped = Later(record.LastSkipped, entry.LastSkipped),
-                    Rating = entry.Rating ?? record.Rating,
-                },
-            };
-
-            if (request.Stats is null)
-            {
-                continue; // stats return is off: the iPod keeps its counts, nothing goes to Plex
-            }
-
-            if (entry.Plays > 0)
-            {
-                pendingPlays[current.RatingKey] = pendingPlays.GetValueOrDefault(current.RatingKey) + (int)Math.Min(entry.Plays, 1000);
-            }
-
-            if (entry.Rating is { } stars && stars != onIpod.Rating)
-            {
-                pendingRatings[current.RatingKey] = stars == 0 ? -1 : stars / 10;
-            }
-        }
-
+        var read = ReadPlayCounts(run.Root, run.State.Tracks.Values.ToList(), warnings);
         run.Warnings.AddRange(warnings);
-        if (hadCounts)
+        if (read.Bytes is not null && !read.Usable)
         {
-            // Counts are in the manifest and the plays are pending: only now can the firmware's file go.
+            // ML1: never destroy plays PlexPod couldn't read; and never leave them for the next
+            // rebuilt database to be lined up against the wrong tracks.
+            SetPlayCountsAside(run);
+        }
+        else if (read.Bytes is not null)
+        {
+            // M1: the file's fingerprint, kept with each half, is the bookmark. Counts go into the manifest
+            // only if these exact bytes haven't been folded in before, and plays into pending likewise.
+            var foldCounts = run.State.ConsumedPlayCounts != read.Sha;
+            var foldPending = request.Stats is not null && state.ConsumedPlayCounts != read.Sha;
+            foreach (var (owned, onIpod, entry) in read.Matches)
+            {
+                var current = run.State.Tracks.GetValueOrDefault(owned.DevicePath) ?? owned;
+                if (foldCounts)
+                {
+                    var record = current.Stock!;
+                    run.State.Tracks[current.DevicePath] = current with
+                    {
+                        Stock = record with
+                        {
+                            PlayCount = record.PlayCount + entry.Plays,
+                            LastPlayed = Later(record.LastPlayed, entry.LastPlayed),
+                            SkipCount = record.SkipCount + entry.Skips,
+                            LastSkipped = Later(record.LastSkipped, entry.LastSkipped),
+                            Rating = entry.Rating ?? record.Rating,
+                        },
+                    };
+                }
+
+                if (foldPending && entry.Plays > 0)
+                {
+                    pendingPlays[current.RatingKey] = pendingPlays.GetValueOrDefault(current.RatingKey) + (int)Math.Min(entry.Plays, 1000);
+                }
+
+                if (foldPending && entry.Rating is { } stars && stars != onIpod.Rating)
+                {
+                    pendingRatings[current.RatingKey] = stars == 0 ? -1 : stars / 10;
+                }
+            }
+
+            run.State.ConsumedPlayCounts = read.Sha;
+            state = state with { PendingPlays = pendingPlays, PendingRatings = pendingRatings, ConsumedPlayCounts = read.Sha };
+            await run.Store.SaveStatsAsync(state, CancellationToken.None).ConfigureAwait(false);
             await run.SaveAsync().ConfigureAwait(false);
-            await run.Store.SaveStatsAsync(state with { PendingPlays = pendingPlays, PendingRatings = pendingRatings }, CancellationToken.None).ConfigureAwait(false);
-            DeviceFileOps.Delete(run.Root, DevicePaths.PlayCountsPath);
+            try
+            {
+                DeviceFileOps.Delete(run.Root, DevicePaths.PlayCountsPath);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException && Directory.Exists(run.Root))
+            {
+                // Harmless now: the fingerprint stops these bytes being counted again.
+                run.Warnings.Add($"The iPod's Play Counts file couldn't be deleted ({ex.Message}); its plays are recorded and won't be counted twice.");
+            }
         }
 
         if (request.Stats is not { } options || pendingPlays.Count + pendingRatings.Count == 0)
@@ -583,6 +611,20 @@ public sealed class SyncEngine(
         }
 
         run.Stats = new StatsResult(plays, ratings, waitingPlays, pendingRatings.Count, 0, 0, error, lines);
+    }
+
+    /// <summary>Moves an unusable Play Counts aside (replacing an older one), so it's kept but never matched against a rebuilt database.</summary>
+    private void SetPlayCountsAside(Run run)
+    {
+        try
+        {
+            DeviceFileOps.Delete(run.Root, DevicePaths.PlayCountsBackupPath);
+            files.Move(run.Root, DevicePaths.PlayCountsPath, DevicePaths.PlayCountsBackupPath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException && Directory.Exists(run.Root))
+        {
+            run.Warnings.Add($"The iPod's unreadable Play Counts file couldn't be set aside ({ex.Message}).");
+        }
     }
 
     private static DateTime? Later(DateTime? a, DateTime? b) => a is null ? b : b is null ? a : a > b ? a : b;
@@ -1321,6 +1363,28 @@ public sealed class SyncEngine(
         return result;
     }
 
+    /// <summary>
+    /// For the fit check: files named by PlexPod playlists the sync leaves as they are (not removed, not
+    /// rewritten). The removal step's P5 guard won't delete those, so they mustn't count as freed space.
+    /// </summary>
+    private static HashSet<string> StillReferenced(string root, SyncPlan plan)
+    {
+        var changing = plan.PlaylistRemovals.Select(p => p.DevicePath)
+            .Concat(plan.PlaylistOps.Where(p => p.NeedsWrite).Select(p => p.DevicePath))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var referenced = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var op in plan.PlaylistOps.Where(p => p.Existing is not null && !changing.Contains(p.Existing.DevicePath)))
+        {
+            var local = DevicePaths.ToLocal(root, op.Existing!.DevicePath);
+            if (File.Exists(local))
+            {
+                referenced.UnionWith(PlaylistWriter.TrackLines(File.ReadAllText(local)).Select(l => l.Path));
+            }
+        }
+
+        return referenced;
+    }
+
     private static HashSet<string> ReferencedPaths(Run run)
     {
         var referenced = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -1341,6 +1405,7 @@ public sealed class SyncEngine(
     internal static List<SyncTrackTarget> BuildTargets(SyncRequest request, List<string>? unplayable = null)
     {
         var stock = request.Firmware == IpodFirmware.Stock;
+        var stockNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var snapshot = request.Snapshot;
         var fromPlaylists = request.PlaylistContents.Values
             .SelectMany(c => c.Entries)
@@ -1373,7 +1438,13 @@ public sealed class SyncEngine(
                     continue;
                 }
 
-                path = IpodPath.ForTrack(track.RatingKey, ext);
+                // Two tracks hashing to the same short name get another name, never a " (2)" suffix.
+                var attempt = 0;
+                do
+                {
+                    path = IpodPath.ForTrack(track.RatingKey, ext, attempt++);
+                }
+                while (!stockNames.Add(path));
                 var flac = SizeEstimator.EstimateBytes(track, request.FormatOverrides.GetValueOrDefault(key) ?? track.Format).Bytes;
                 estimate = isFlac ? flac + (flac / 10) : flac; // Apple Lossless runs a few % larger than FLAC
             }
@@ -1726,6 +1797,8 @@ public sealed class SyncEngine(
 
         public string? StockSignature { get; set; } = source.StockDatabaseSignature;
 
+        public string? ConsumedPlayCounts { get; set; } = source.ConsumedPlayCounts;
+
         public Dictionary<string, ManifestTrack> Tracks { get; } = source.Tracks
             .GroupBy(t => t.DevicePath, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
 
@@ -1742,6 +1815,7 @@ public sealed class SyncEngine(
             DeviceId = DeviceId,
             Firmware = Firmware,
             StockDatabaseSignature = StockSignature,
+            ConsumedPlayCounts = ConsumedPlayCounts,
             Tracks = [.. Tracks.Values.OrderBy(t => t.DevicePath, StringComparer.Ordinal)],
             Playlists = [.. Playlists.Values.OrderBy(p => p.DevicePath, StringComparer.Ordinal)],
             Extras = [.. Extras.Values.OrderBy(e => e.DevicePath, StringComparer.Ordinal)],

@@ -206,8 +206,8 @@ public sealed partial class SyncViewModel(
     private bool CanSendPlays() => device.SelectedDevice is { Firmware: IpodFirmware.Rockbox } && library.Client is not null && library.Snapshot is not null && gate.IsFree;
 
     /// <summary>D11: send plays and ratings from the iPod now, without syncing.</summary>
-    [RelayCommand(CanExecute = nameof(CanSendPlays))]
-    private async Task SendPlaysNowAsync()
+    [RelayCommand(CanExecute = nameof(CanSendPlays), IncludeCancelCommand = true)]
+    private async Task SendPlaysNowAsync(CancellationToken stop)
     {
         if (library.Client is not { } client || library.Snapshot is not { } snapshot || device.SelectedDevice is not { } ipod)
         {
@@ -228,8 +228,13 @@ public sealed partial class SyncViewModel(
         var sending = new Progress<(int Done, int Total)>(p => ProgressText = $"Sending to Plex: {p.Done:N0} of {p.Total:N0}…");
         try
         {
-            var result = await Task.Run(() => stats.SendNowAsync(ipod.DriveRoot, client, options, hasRating, CancellationToken.None, sending));
+            var result = await Task.Run(() => stats.SendNowAsync(ipod.DriveRoot, client, options, hasRating, stop, sending), CancellationToken.None);
             ProgressText = string.Join(" ", result.Lines);
+        }
+        catch (OperationCanceledException) when (stop.IsCancellationRequested)
+        {
+            // Progress is saved every few plays and on the way out, so nothing is sent twice.
+            ProgressText = "Stopped. Plays already sent are recorded; the rest go next time.";
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

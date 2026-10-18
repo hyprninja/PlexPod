@@ -74,9 +74,23 @@ public sealed class PlaybackLogParserTests
     {
         var zone = TimeZoneInfo.CreateCustomTimeZone("Plus10", TimeSpan.FromHours(10), "Plus10", "Plus10");
         var entry = new PlaybackLogEntry(new DateTimeOffset(2026, 10, 1, 20, 30, 0, TimeSpan.Zero).ToUnixTimeSeconds(), 1, 1, "/Music/a", 0);
-        var at = entry.PlayedAt(zone);
+        var at = entry.PlayedAt(zone)!.Value;
         Assert.Equal(new DateTime(2026, 10, 1, 20, 30, 0), at.DateTime);
         Assert.Equal(TimeSpan.FromHours(10), at.Offset);
+    }
+
+    [Theory]
+    [InlineData(123_456_789_012_345)] // corrupt: would overflow DateTime
+    [InlineData(5)]                   // clock never set
+    [InlineData(long.MaxValue)]
+    public void PlayedAt_ImplausibleTimestamp_IsNull_NotAnException(long timestamp) =>
+        Assert.Null(new PlaybackLogEntry(timestamp, 1, 1, "/Music/a", 0).PlayedAt(TimeZoneInfo.Utc));
+
+    [Fact]
+    public void Parse_CorruptTimestamp_StillParsesThePlay()
+    {
+        var parsed = PlaybackLogParser.Parse(Encoding.UTF8.GetBytes("123456789012345:200:200:/Music/a.flac\n"));
+        Assert.Single(parsed.Entries);
     }
 }
 

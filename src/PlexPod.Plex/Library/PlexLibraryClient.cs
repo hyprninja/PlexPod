@@ -288,8 +288,13 @@ public sealed class PlexLibraryClient(
         var all = new List<MetadataDto>();
         var pageSize = Math.Max(1, options.PageSize);
         List<MetadataDto>? previous = null;
-        while (true)
+        for (var pages = 1; ; pages++)
         {
+            if (pages > Math.Max(1, options.MaxPages))
+            {
+                throw new PlexProtocolException($"The Plex server kept sending pages ({options.MaxPages:N0} read) without saying how many there are; stopped.");
+            }
+
             var page = await GetContainerAsync(path, (all.Count, pageSize), ct).ConfigureAwait(false);
             var items = page.Metadata ?? [];
 

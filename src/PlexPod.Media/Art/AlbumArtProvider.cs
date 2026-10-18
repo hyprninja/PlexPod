@@ -43,7 +43,7 @@ public sealed class AlbumArtProvider(MediaPaths paths, ILogger<AlbumArtProvider>
             await WriteAtomicAsync(coverPath, images.CoverJpeg, ct).ConfigureAwait(false);
             return images;
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException)
         {
             logger.LogWarning("Album art for {Album} failed: {Message}", album.Title, ex.Message);
             return null;

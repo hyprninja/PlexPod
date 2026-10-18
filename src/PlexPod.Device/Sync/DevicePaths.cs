@@ -22,8 +22,11 @@ public static class DevicePaths
 
     public const string PlayCountsPath = "/iPod_Control/iTunes/Play Counts";
 
+    /// <summary>A Play Counts file PlexPod couldn't use, set aside instead of deleted (its plays can still be recovered by hand).</summary>
+    public const string PlayCountsBackupPath = "/iPod_Control/iTunes/Play Counts.plexpod-bak";
+
     /// <summary>The stock firmware's database, rebuilt by PlexPod, and its Play Counts, consumed and deleted as iTunes does (D14).</summary>
-    public static readonly IReadOnlyList<string> ManagedFiles = [ItunesDbPath, PlayCountsPath];
+    public static readonly IReadOnlyList<string> ManagedFiles = [ItunesDbPath, PlayCountsPath, PlayCountsBackupPath];
 
     /// <exception cref="ArgumentException">Not a safe absolute device path, or it would resolve outside the drive.</exception>
     public static string ToLocal(string driveRoot, string devicePath)

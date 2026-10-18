@@ -34,7 +34,10 @@ public static class StatsReader
 
     internal const int MaxRotatedLogs = 1000;
 
-    public static async Task<DeviceStatsFiles> ReadAsync(string driveRoot, CancellationToken ct)
+    /// <summary>All logs together: beyond this the rest are skipped (and tried again next time), since everything read is held in memory.</summary>
+    public const long MaxTotalLogBytes = 256L << 20;
+
+    public static async Task<DeviceStatsFiles> ReadAsync(string driveRoot, CancellationToken ct, long maxTotalBytes = MaxTotalLogBytes)
     {
         ArgumentException.ThrowIfNullOrEmpty(driveRoot);
         var folder = Path.Combine(driveRoot, RockboxFolder);
@@ -46,15 +49,18 @@ public static class StatsReader
             return new DeviceStatsFiles(logs, null, null, null, skipped);
         }
 
+        long total = 0;
         foreach (var file in LogFiles(folder))
         {
             ct.ThrowIfCancellationRequested();
             var info = new FileInfo(file);
-            if (info.Length > MaxLogBytes)
+            if (info.Length > MaxLogBytes || total + info.Length > maxTotalBytes)
             {
                 skipped.Add(info.Name);
                 continue;
             }
+
+            total += info.Length;
 
             if (await TryReadAsync(file, MaxLogBytes, ct).ConfigureAwait(false) is { } bytes)
             {

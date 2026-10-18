@@ -76,6 +76,12 @@ public sealed record DeviceManifest
     /// <summary>Stock firmware: what the iTunesDB on the iPod was built from (tracks, stamps, playlists), to tell whether it needs rebuilding.</summary>
     public string? StockDatabaseSignature { get; init; }
 
+    /// <summary>
+    /// Stock firmware: SHA-256 of the last Play Counts file whose counts were folded into these tracks.
+    /// The same bytes are never folded in twice, even if deleting the file failed or the sync stopped first.
+    /// </summary>
+    public string? ConsumedPlayCounts { get; init; }
+
     public DateTimeOffset UpdatedAt { get; init; }
 
     public IReadOnlyList<ManifestTrack> Tracks { get; init; } = [];

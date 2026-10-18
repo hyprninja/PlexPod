@@ -158,6 +158,20 @@ public sealed class PlexLibraryClientTests
     }
 
     [Fact]
+    public async Task Paging_EndlessPagesWithoutTotalSize_StopsAtThePageCap()
+    {
+        var page = 0;
+        var fake = new FakeHttpHandler(_ =>
+        {
+            page++;
+            return Json($$"""{ "MediaContainer": { "Metadata": [ { "ratingKey": "{{page}}a" }, { "ratingKey": "{{page}}b" } ] } }""");
+        });
+        await Assert.ThrowsAsync<PlexProtocolException>(() => Create(fake, new PlexClientOptions { ClientIdentifier = "c", PageSize = 2, MaxPages = 5 })
+            .GetAlbumsAsync("3", null, CancellationToken.None));
+        Assert.Equal(5, fake.Requests.Count);
+    }
+
+    [Fact]
     public async Task Paging_IgnoredStartAndSize_ReturnsTheFirstAnswerOnce()
     {
         var fake = new FakeHttpHandler(_ => Json("""{ "MediaContainer": { "Metadata": [ { "ratingKey": "1" }, { "ratingKey": "2" }, { "ratingKey": "3" } ] } }"""));

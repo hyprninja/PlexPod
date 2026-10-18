@@ -31,6 +31,9 @@ public sealed class PlexClientOptions
 
     /// <summary>Page size for <c>X-Plex-Container-Size</c>.</summary>
     public int PageSize { get; init; } = 1000;
+
+    /// <summary>Pages read for one list before giving up: a server that never says it's done can't keep a load going forever.</summary>
+    public int MaxPages { get; init; } = 10_000;
 }
 
 /// <summary>Supplies the plex.tv account token. Server requests carry the server's own access token.</summary>

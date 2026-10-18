@@ -43,6 +43,9 @@ public sealed record StatsState
     /// <summary>Stock firmware: ratings changed on the iPod (0–10, or -1 for cleared) not yet accepted by Plex.</summary>
     public IReadOnlyDictionary<string, int> PendingRatings { get; init; } = new Dictionary<string, int>();
 
+    /// <summary>Stock firmware: SHA-256 of the last Play Counts file whose plays were added to <see cref="PendingPlays"/>.</summary>
+    public string? ConsumedPlayCounts { get; init; }
+
     public static StatsState Empty { get; } = new();
 }
 
