@@ -34,6 +34,16 @@ public sealed class TagWriter
     // TagLib's BoxType is internal; the atom name is Latin-1 "©day".
     private static readonly ByteVector DayAtom = ByteVector.FromString("©day", StringType.Latin1);
 
+    // MP4 text atoms (TagLib# keeps its own names internal).
+    private static readonly ByteVector NamAtom = ByteVector.FromString("©nam", StringType.Latin1);
+    private static readonly ByteVector ArtAtom = ByteVector.FromString("©ART", StringType.Latin1);
+    private static readonly ByteVector AartAtom = ByteVector.FromString("aART", StringType.Latin1);
+    private static readonly ByteVector AlbAtom = ByteVector.FromString("©alb", StringType.Latin1);
+    private static readonly ByteVector GenAtom = ByteVector.FromString("©gen", StringType.Latin1);
+    private static readonly ByteVector GrpAtom = ByteVector.FromString("©grp", StringType.Latin1);
+    private static readonly ByteVector WrtAtom = ByteVector.FromString("©wrt", StringType.Latin1);
+    private static readonly ByteVector CmtAtom = ByteVector.FromString("©cmt", StringType.Latin1);
+
     static TagWriter()
     {
         // ID3v2.4 with UTF-8 text for every frame PlexPod writes.
@@ -381,25 +391,25 @@ public sealed class TagWriter
 
     private static void WriteApple(TagLib.Mpeg4.AppleTag apple, TagSet tags, Picture? picture)
     {
-        apple.Title = tags.Title;
-        apple.Performers = tags.Artist is null ? [] : [tags.Artist];
-        apple.AlbumArtists = tags.AlbumArtist is null ? [] : [tags.AlbumArtist];
-        apple.Album = tags.Album;
+        AppleText(apple, NamAtom, tags.Title);
+        AppleText(apple, ArtAtom, tags.Artist);
+        AppleText(apple, AartAtom, tags.AlbumArtist);
+        AppleText(apple, AlbAtom, tags.Album);
         apple.Track = (uint)(tags.TrackNumber ?? 0);
         apple.TrackCount = tags.TrackNumber is null ? 0 : (uint)(tags.TrackTotal ?? 0);
         apple.Disc = (uint)(tags.DiscNumber ?? 0);
         apple.DiscCount = tags.DiscNumber is null ? 0 : (uint)(tags.DiscTotal ?? 0);
         if (tags.Date is not null)
         {
-            apple.SetText(DayAtom, tags.Date);
+            AppleText(apple, DayAtom, tags.Date);
         }
 
-        apple.Genres = tags.Genre is null ? [] : [tags.Genre];
-        apple.Grouping = tags.Grouping;
+        AppleText(apple, GenAtom, tags.Genre);
+        AppleText(apple, GrpAtom, tags.Grouping);
         apple.IsCompilation = tags.Compilation;
         apple.MusicBrainzTrackId = tags.MusicBrainzTrackId;
-        apple.Composers = tags.Composer is null ? [] : [tags.Composer];
-        apple.Comment = tags.Comment;
+        AppleText(apple, WrtAtom, tags.Composer);
+        AppleText(apple, CmtAtom, tags.Comment);
         if (tags.Label is not null)
         {
             apple.SetDashBox(DashMean, TagSet.LabelKey, tags.Label);
@@ -410,6 +420,26 @@ public sealed class TagWriter
         apple.SetDashBox(DashMean, TagSet.PartIdKey, tags.PlexPodPartId.ToString(CultureInfo.InvariantCulture));
         apple.Pictures = picture is null ? [] : [picture];
     }
+
+    /// <summary>
+    /// One text atom holding exactly <paramref name="value"/>. TagLib#'s own text setters split on ';'
+    /// into several values (the iPod then shows only the first: "PetroDragonic Apocalypse" for
+    /// "PetroDragonic Apocalypse; or, Dawn of …"), so the data is written directly.
+    /// </summary>
+    private static void AppleText(TagLib.Mpeg4.AppleTag apple, ByteVector atom, string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            apple.ClearData(atom);
+            return;
+        }
+
+        apple.SetData(atom, new ByteVectorCollection { ByteVector.FromString(value, StringType.UTF8) }, (uint)TagLib.Mpeg4.AppleDataBox.FlagType.ContainsText);
+    }
+
+    /// <summary>The first text value of an atom, whole: TagLib#'s getters split it on ';' like its setters.</summary>
+    private static string? AppleRaw(TagLib.Mpeg4.AppleTag apple, ByteVector atom) =>
+        apple.DataBoxes(atom).FirstOrDefault(b => b.Flags == (uint)TagLib.Mpeg4.AppleDataBox.FlagType.ContainsText)?.Text;
 
     private static void ReadApple(TagLib.Mpeg4.AppleTag apple, List<KeyValuePair<string, string>> fields)
     {
@@ -423,22 +453,22 @@ public sealed class TagWriter
 
         static string? N(uint n) => n == 0 ? null : n.ToString(CultureInfo.InvariantCulture);
 
-        Add(TagSet.TitleKey, apple.Title);
-        Add(TagSet.ArtistKey, apple.FirstPerformer);
-        Add(TagSet.AlbumArtistKey, apple.FirstAlbumArtist);
-        Add(TagSet.AlbumKey, apple.Album);
+        Add(TagSet.TitleKey, AppleRaw(apple, NamAtom));
+        Add(TagSet.ArtistKey, AppleRaw(apple, ArtAtom));
+        Add(TagSet.AlbumArtistKey, AppleRaw(apple, AartAtom));
+        Add(TagSet.AlbumKey, AppleRaw(apple, AlbAtom));
         Add(TagSet.TrackNumberKey, N(apple.Track));
         Add(TagSet.TrackTotalKey, N(apple.TrackCount));
         Add(TagSet.DiscNumberKey, N(apple.Disc));
         Add(TagSet.DiscTotalKey, N(apple.DiscCount));
-        Add(TagSet.DateKey, apple.GetText(DayAtom).FirstOrDefault());
-        Add(TagSet.GenreKey, apple.FirstGenre);
-        Add(TagSet.GroupingKey, apple.Grouping);
+        Add(TagSet.DateKey, AppleRaw(apple, DayAtom));
+        Add(TagSet.GenreKey, AppleRaw(apple, GenAtom));
+        Add(TagSet.GroupingKey, AppleRaw(apple, GrpAtom));
         Add(TagSet.CompilationKey, apple.IsCompilation ? "1" : null);
         Add(TagSet.LabelKey, apple.GetDashBox(DashMean, TagSet.LabelKey));
         Add(TagSet.MusicBrainzTrackIdKey, apple.MusicBrainzTrackId);
-        Add(TagSet.ComposerKey, apple.FirstComposer);
-        Add(TagSet.CommentKey, apple.Comment);
+        Add(TagSet.ComposerKey, AppleRaw(apple, WrtAtom));
+        Add(TagSet.CommentKey, AppleRaw(apple, CmtAtom));
         foreach (var key in new[] { TagSet.RatingKeyKey, TagSet.GuidKey, TagSet.PartIdKey, TagSet.LegacyRatingKeyKey, TagSet.LegacyGuidKey, TagSet.LegacyPartIdKey })
         {
             Add(key, apple.GetDashBox(DashMean, key));

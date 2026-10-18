@@ -148,6 +148,33 @@ public sealed class TagWriterTests : IDisposable
         Assert.Equal(1, back.PictureCount);
     }
 
+    /// <summary>A semicolon is part of the value ("PetroDragonic Apocalypse; or, Dawn of …"), never a list separator.</summary>
+    [Theory]
+    [InlineData("tone.m4a")]
+    [InlineData("tone.mp3")]
+    [InlineData("tone-16-44.flac")]
+    public void Semicolons_AreKeptInEveryTextField(string fixture)
+    {
+        var path = _dir.CopyFixture(fixture);
+        var tags = Tags with
+        {
+            Title = "Supercell; Live",
+            Artist = "King Gizzard; the Lizard Wizard",
+            AlbumArtist = "King Gizzard; the Lizard Wizard",
+            Album = "PetroDragonic Apocalypse; or, Dawn of Eternal Night: An Annihilation of Planet Earth and the Beginning of Merciless Damnation",
+            Genre = "Metal; Thrash",
+            Grouping = "Side A; Side B",
+            Composer = "Mackenzie; Walker",
+            Comment = "one; two",
+            Label = "KGLW; ATO",
+        };
+
+        TagWriter.Write(path, tags, null);
+
+        var back = TagWriter.ReadBack(path);
+        Assert.Equal(tags.ToFields().Select(f => $"{f.Key}={f.Value}").Order(), back.Fields.Select(f => $"{f.Key}={f.Value}").Order());
+    }
+
     [Fact]
     public void Mp3_TotalWithoutNumber_IsDroppedConsistently()
     {
