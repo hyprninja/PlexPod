@@ -11,7 +11,8 @@ public sealed record AlbumItem(
     string ArtistTitle,
     int? Year,
     int TrackCount,
-    string? ThumbPath = null);
+    string? ThumbPath = null,
+    long? UpdatedAt = null);
 
 /// <summary>
 /// Audio properties as Plex reports them. Bit depth and sample rate are usually missing from

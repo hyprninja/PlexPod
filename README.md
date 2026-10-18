@@ -3,7 +3,7 @@
 Syncs a Plex Media Server music library to an iPod 5.5G (Video) running Rockbox. Plex is the source of truth.
 Windows desktop app: .NET 10, WPF, Fluent theme.
 
-**Milestones 1 (foundation + pickers) and 2 (media pipeline) are implemented.** Nothing is written to the iPod yet: M2's **Test export** writes the processed files to a folder on the PC, and syncing arrives with M3.
+**Milestones 1–3 are implemented:** Plex sign-in and pickers, the media pipeline (conversion, clean tags, art) and the **sync engine**. **Sync** shows the plan first, copies and verifies every file, writes playlists that never break, and only ever touches files it created (tracked in `/.rockplex/manifest.json` on the iPod).
 
 Requires **ffmpeg** with soxr for hi-res conversion and for verification (`winget install Gyan.FFmpeg`). RockPlex finds it on PATH or in winget's folder, or you can set the path in Settings.
 
@@ -19,10 +19,10 @@ dotnet run --project src/RockPlex.App
 ## Layout
 | Project | What it does |
 |---|---|
-| `src/RockPlex.Core` | Models, format policy, size estimates, selection resolver, capacity check. No packages, no I/O. |
+| `src/RockPlex.Core` | Models, format policy, size estimates, selection resolver, capacity check, tag mapping, sync planner, fit check, playlist writer. No packages, no I/O. |
 | `src/RockPlex.Plex` | plex.tv PIN sign-in, server discovery and connection probing, library/playlist reads, track detail enrichment. |
-| `src/RockPlex.Device` | Rockbox drive detection, `rockbox-info.txt` parsing, plug/unplug watcher. |
-| `src/RockPlex.Media` | Download → format decision from the real file → ffmpeg conversion (soxr, TPDF dither) → tag wipe + rewrite (TagLibSharp) → baseline JPEG art (WIC) → verification; conversion cache; Test export. |
+| `src/RockPlex.Device` | Rockbox drive detection and watcher; on-device state (`/.rockplex/`), verified copies (temp → unbuffered read-back → rename), playlist line checks. |
+| `src/RockPlex.Media` | Download → format decision from the real file → ffmpeg conversion (soxr, TPDF dither) → tag wipe + rewrite (TagLibSharp) → baseline JPEG art (WIC) → verification; conversion cache; Test export; **SyncEngine** and adoption. |
 | `src/RockPlex.App` | WPF shell: generic host, settings, DPAPI token store, rolling log, view models. |
 | `tests/RockPlex.Tests` | xUnit tests for Core, Plex (fake HTTP + JSON fixtures), Device (temp dirs as drives) and Media (tiny audio fixtures; ffmpeg tests are skipped if ffmpeg is missing). |
 

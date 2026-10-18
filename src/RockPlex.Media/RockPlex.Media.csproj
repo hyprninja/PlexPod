@@ -13,6 +13,7 @@
   <ItemGroup>
     <ProjectReference Include="..\RockPlex.Core\RockPlex.Core.csproj" />
     <ProjectReference Include="..\RockPlex.Plex\RockPlex.Plex.csproj" />
+    <ProjectReference Include="..\RockPlex.Device\RockPlex.Device.csproj" />
   </ItemGroup>
 
   <ItemGroup>

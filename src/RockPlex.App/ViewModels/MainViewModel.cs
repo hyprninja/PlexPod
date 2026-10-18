@@ -46,6 +46,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         SummaryViewModel summary,
         SettingsViewModel settingsView,
         ExportViewModel export,
+        SyncViewModel sync,
         IPlexServerDiscovery discovery,
         IPlexLibraryClientFactory clients,
         TrackDetailEnricher enricher,
@@ -61,6 +62,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         Summary = summary;
         Settings = settingsView;
         Export = export;
+        Sync = sync;
         _discovery = discovery;
         _clients = clients;
         _enricher = enricher;
@@ -76,7 +78,28 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         Server.ServerPicked += async (_, _) => await RunLoadAsync(ct => ConnectAsync(Server.SelectedServer!, ct));
         Server.SectionPicked += async (_, _) => await RunLoadAsync(ct => LoadLibraryAsync(Server.SelectedSection!, ct));
         Selection.Changed += (_, _) => ScheduleRecalc();
-        Device.CapacityChanged += (_, _) => ScheduleRecalc();
+        Device.CapacityChanged += async (_, _) =>
+        {
+            // During a sync the free space changes constantly; re-read RockPlex's manifest only when idle.
+            if (!Sync.SyncCommand.IsRunning)
+            {
+                await Sync.RefreshDeviceAsync();
+            }
+
+            ScheduleRecalc();
+        };
+        Sync.Finished += (_, _) =>
+        {
+            LoadKnownSizes();
+            ScheduleRecalc();
+        };
+        Sync.LoadDeviceSelectionRequested += (_, profile) =>
+        {
+            if (_library.Snapshot is { } snapshot)
+            {
+                Selection.ApplyProfile(profile, snapshot);
+            }
+        };
         Export.Finished += (_, _) =>
         {
             LoadKnownSizes();
@@ -97,6 +120,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public SettingsViewModel Settings { get; }
 
     public ExportViewModel Export { get; }
+
+    public SyncViewModel Sync { get; }
 
     [ObservableProperty]
     public partial bool IsBusy { get; private set; }
@@ -359,7 +384,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private async Task RecalculateAsync(CancellationToken ct)
     {
         var snapshot = _library.Snapshot;
-        var capacity = Device.Capacity;
+        // Files RockPlex already owns on the iPod are part of the selection, so they count as available.
+        var capacity = Device.Capacity is { } device ? device with { ManagedBytes = Sync.ManagedBytes } : null;
         var hasDevice = capacity is not null;
         capacity ??= new DeviceCapacity(SummaryViewModel.NominalUsableBytes, SummaryViewModel.NominalUsableBytes + CapacityCalculator.ReserveBytes);
 
@@ -381,6 +407,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             ct.ThrowIfCancellationRequested();
             Summary.Update(resolved, CapacityCalculator.Calculate(capacity, resolved), hasDevice);
             Export.SetSelection(resolved);
+            Sync.SetSelection(resolved, profile);
 
             if (!SameProfile(_settings.Current.Selection, profile))
             {

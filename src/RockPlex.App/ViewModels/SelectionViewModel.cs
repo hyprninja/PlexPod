@@ -144,6 +144,23 @@ public sealed partial class SelectionViewModel : ObservableObject
             [.. Artists.Checked.Select(i => i.ToRef()), .. _missingArtists],
             [.. Albums.Checked.Select(i => i.ToRef()), .. _missingAlbums]);
 
+    /// <summary>Replaces the current picks with <paramref name="profile"/> (e.g. the selection stored on the iPod).</summary>
+    public void ApplyProfile(SelectionProfile profile, LibrarySnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        _restoring = true;
+        try
+        {
+            Restore(profile, snapshot);
+        }
+        finally
+        {
+            _restoring = false;
+        }
+
+        RaiseChanged();
+    }
+
     /// <summary>Drops saved picks that no longer exist in Plex.</summary>
     public void ForgetMissing()
     {

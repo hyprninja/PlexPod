@@ -77,6 +77,9 @@ public sealed record TagPolicy
     ];
 
     public static TagPolicy None { get; } = Fields.Aggregate(new TagPolicy(), (p, f) => f.Set(p, false));
+
+    /// <summary>Compact fingerprint of the switches, e.g. "1111111110110110", stored in the manifest's metadata stamp.</summary>
+    public string Fingerprint() => string.Concat(Fields.Select(f => f.Get(this) ? '1' : '0'));
 }
 
 /// <summary>

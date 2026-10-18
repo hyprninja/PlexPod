@@ -167,6 +167,24 @@
                 <TextBlock Text="{Binding Summary.WarningText}" TextWrapping="Wrap" Foreground="DarkOrange" VerticalAlignment="Center" />
             </DockPanel>
 
+            <!-- The iPod carries a different saved selection (/.rockplex/selection.json). -->
+            <DockPanel Margin="0,10,0,0" Visibility="{Binding Sync.DeviceSelectionHint, Converter={StaticResource VisibleWhen}}">
+                <Button DockPanel.Dock="Right" Content="Load it" Command="{Binding Sync.LoadDeviceSelectionCommand}" Margin="8,0,0,0" />
+                <TextBlock Text="{Binding Sync.DeviceSelectionHint}" TextWrapping="Wrap" VerticalAlignment="Center" />
+            </DockPanel>
+
+            <!-- Sync (M3): progress and a safe Stop. -->
+            <DockPanel Margin="0,10,0,0" Visibility="{Binding Sync.ProgressText, Converter={StaticResource VisibleWhen}}">
+                <Button DockPanel.Dock="Right" Content="Stop" Command="{Binding Sync.SyncCancelCommand}" Margin="8,0,0,0"
+                        ToolTip="Finishes the file being copied, then stops. The iPod stays consistent."
+                        Visibility="{Binding Sync.SyncCommand.IsRunning, Converter={StaticResource VisibleWhen}}" />
+                <StackPanel>
+                    <ProgressBar Height="4" Minimum="0" Maximum="1" Value="{Binding Sync.ProgressValue, Mode=OneWay}"
+                                 Visibility="{Binding Sync.SyncCommand.IsRunning, Converter={StaticResource VisibleWhen}}" />
+                    <TextBlock Text="{Binding Sync.ProgressText}" TextWrapping="Wrap" Margin="0,4,0,0" />
+                </StackPanel>
+            </DockPanel>
+
             <!-- Test export (M2): writes to a PC folder only. -->
             <DockPanel Margin="0,10,0,0" Visibility="{Binding Export.ProgressText, Converter={StaticResource VisibleWhen}}">
                 <Button DockPanel.Dock="Right" Content="Open folder" Command="{Binding Export.OpenFolderCommand}" Margin="8,0,0,0" />
@@ -180,8 +198,8 @@
             </DockPanel>
 
             <DockPanel Margin="0,10,0,0">
-                <Button DockPanel.Dock="Right" Content="Sync" IsEnabled="False" MinWidth="100"
-                        ToolTip="Syncing arrives in a later version. Nothing is written to the iPod yet." />
+                <Button DockPanel.Dock="Right" Content="Sync" Command="{Binding Sync.SyncCommand}" MinWidth="100"
+                        ToolTip="Make the iPod match your selection. Shows the plan first; nothing changes until you confirm." />
                 <Button DockPanel.Dock="Right" Content="Test export…" Command="{Binding Export.ExportCommand}" Margin="0,0,8,0"
                         ToolTip="Process the selection into a folder on this PC (converted, re-tagged, with art) to check before syncing." />
                 <ProgressBar DockPanel.Dock="Left" Width="80" Height="4" IsIndeterminate="True" Margin="0,0,10,0"

@@ -46,6 +46,7 @@ public partial class App : Application
         services.AddRockPlexDevice();
         services.AddRockPlexMedia(paths.Cache);
         services.AddSingleton<IFolderPicker, FolderPicker>();
+        services.AddSingleton<ISyncConfirmation, SyncConfirmation>();
 
         services.AddSingleton<SignInViewModel>();
         services.AddSingleton<ServerViewModel>();
@@ -54,6 +55,7 @@ public partial class App : Application
         services.AddSingleton<SummaryViewModel>();
         services.AddSingleton<SettingsViewModel>();
         services.AddSingleton<ExportViewModel>();
+        services.AddSingleton<SyncViewModel>();
         services.AddSingleton<MainViewModel>();
         services.AddSingleton<MainWindow>();
 

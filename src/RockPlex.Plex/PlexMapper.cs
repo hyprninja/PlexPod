@@ -21,7 +21,8 @@ internal static class PlexMapper
             m.ParentTitle ?? string.Empty,
             m.Year,
             m.LeafCount ?? 0,
-            m.Thumb);
+            m.Thumb,
+            m.UpdatedAt);
 
     /// <summary>
     /// Format and parts come from the first Media element (Plex's primary version) ⚠️.

@@ -1,7 +1,9 @@
 using Microsoft.Extensions.DependencyInjection;
 using RockPlex.Media.Art;
 using RockPlex.Media.Ffmpeg;
+using RockPlex.Device.Sync;
 using RockPlex.Media.Pipeline;
+using RockPlex.Media.Sync;
 
 namespace RockPlex.Media;
 
@@ -20,6 +22,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<AlbumArtProvider>();
         services.AddSingleton<TrackPipeline>();
         services.AddSingleton<TestExportService>();
+        services.AddSingleton<DeviceFileOps>();
+        services.AddSingleton<SyncEngine>();
         return services;
     }
 }

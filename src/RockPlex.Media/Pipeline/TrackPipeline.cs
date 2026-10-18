@@ -27,7 +27,8 @@ public sealed record ProcessedTrack(
     TagWriteOutcome Tagging,
     string TagHash,
     long SizeBytes,
-    bool FromCache);
+    bool FromCache,
+    SourceTags SourceTags);
 
 /// <summary>The track couldn't be processed; nothing was written to its output path.</summary>
 public sealed class PipelineException(string message, Exception? inner = null) : Exception(message, inner);
@@ -105,7 +106,7 @@ public sealed class TrackPipeline(
 
             MoveIntoPlace(staged, job.OutputPath);
             var size = new FileInfo(job.OutputPath).Length;
-            return new ProcessedTrack(job.OutputPath, Describe(action, info, ext), outcome, tags.ContentHash(), size, fromCache);
+            return new ProcessedTrack(job.OutputPath, Describe(action, info, ext), outcome, tags.ContentHash(), size, fromCache, sourceTags);
         }
         catch (Exception ex) when (ex is not OperationCanceledException && KeepFailedSource(original, job))
         {

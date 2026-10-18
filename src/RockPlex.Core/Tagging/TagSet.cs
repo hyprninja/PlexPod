@@ -110,12 +110,19 @@ public sealed record TagSet
     /// Stable hash of everything written. Because stripped fields are null, a policy change that
     /// alters what a file holds changes the hash, which is how M3 spots a tag-only rewrite.
     /// </summary>
-    public string ContentHash()
+    public string ContentHash() => HashFields(ToFields());
+
+    /// <summary>
+    /// Order-independent hash of (key, value) pairs, so tags read back from a file hash the same as
+    /// the set that was written. Keys are compared upper-case.
+    /// </summary>
+    public static string HashFields(IEnumerable<KeyValuePair<string, string>> fields)
     {
+        ArgumentNullException.ThrowIfNull(fields);
         var builder = new StringBuilder();
-        foreach (var (key, value) in ToFields())
+        foreach (var line in fields.Select(f => $"{f.Key.ToUpperInvariant()}={f.Value}").Order(StringComparer.Ordinal))
         {
-            builder.Append(key).Append('=').Append(value).Append('\n');
+            builder.Append(line).Append('\n');
         }
 
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(builder.ToString())));
