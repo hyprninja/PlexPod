@@ -185,23 +185,9 @@
                 </StackPanel>
             </DockPanel>
 
-            <!-- Test export (M2): writes to a PC folder only. -->
-            <DockPanel Margin="0,10,0,0" Visibility="{Binding Export.ProgressText, Converter={StaticResource VisibleWhen}}">
-                <Button DockPanel.Dock="Right" Content="Open folder" Command="{Binding Export.OpenFolderCommand}" Margin="8,0,0,0" />
-                <Button DockPanel.Dock="Right" Content="Cancel" Command="{Binding Export.ExportCancelCommand}" Margin="8,0,0,0"
-                        Visibility="{Binding Export.ExportCommand.IsRunning, Converter={StaticResource VisibleWhen}}" />
-                <StackPanel>
-                    <ProgressBar Height="4" Minimum="0" Maximum="1" Value="{Binding Export.ProgressValue, Mode=OneWay}"
-                                 Visibility="{Binding Export.ExportCommand.IsRunning, Converter={StaticResource VisibleWhen}}" />
-                    <TextBlock Text="{Binding Export.ProgressText}" TextWrapping="Wrap" Margin="0,4,0,0" />
-                </StackPanel>
-            </DockPanel>
-
             <DockPanel Margin="0,10,0,0">
                 <Button DockPanel.Dock="Right" Content="Sync" Command="{Binding Sync.SyncCommand}" MinWidth="100"
                         ToolTip="Make the iPod match your selection. Shows the plan first; nothing changes until you confirm." />
-                <Button DockPanel.Dock="Right" Content="Test export…" Command="{Binding Export.ExportCommand}" Margin="0,0,8,0"
-                        ToolTip="Process the selection into a folder on this PC (converted, re-tagged, with art) to check before syncing." />
                 <Button DockPanel.Dock="Right" Content="Send plays now" Command="{Binding Sync.SendPlaysNowCommand}" Margin="0,0,8,0"
                         ToolTip="Send plays and ratings recorded on the iPod to Plex, without syncing (Rockbox). Every sync does this first anyway, and on Apple's firmware only a sync can." ToolTipService.ShowOnDisabled="True" />
                 <ProgressBar DockPanel.Dock="Left" Width="80" Height="4" IsIndeterminate="True" Margin="0,0,10,0"

@@ -47,7 +47,6 @@ PlexPod is a Windows app that syncs music from a Plex Media Server to an iPod. P
 - **Every file is verified** by reading it back from the iPod before it replaces anything. The iPod's library database is rebuilt in full, checked, and swapped in only when complete.
 - **Safe to unplug** or stop at any time: the next sync picks up where it left off.
 - **Fast repeat syncs:** unchanged tracks are skipped, a Plex edit only rewrites the tags it affects, and converted files are cached on the PC.
-- **Test export** writes the processed files to a folder on your PC, if you want to see the results before syncing.
 
 ## Which iPods work
 
@@ -123,7 +122,7 @@ dotnet test  PlexPod.slnx
 | `src/PlexPod.Core` | Models, format policy, size estimates, selection, tag mapping, sync planner, fit check, playlist writer, iTunesDB and ArtworkDB writer and reader, Play Counts, play-log parsing. No packages, no I/O. |
 | `src/PlexPod.Plex` | Plex sign-in, server discovery, library and playlist reads, play and rating write-back. |
 | `src/PlexPod.Device` | iPod detection (Apple firmware or Rockbox), on-iPod state (`/.plexpod/`), verified copies, playlist checks, Rockbox log reading. |
-| `src/PlexPod.Media` | Download, conversion (ffmpeg/soxr, Apple Lossless), tag rewrite (TagLibSharp), artwork (WIC), verification, Test export, sync engine, stats return. |
+| `src/PlexPod.Media` | Download, conversion (ffmpeg/soxr, Apple Lossless), tag rewrite (TagLibSharp), artwork (WIC), verification, sync engine, stats return. |
 | `src/PlexPod.App` | The WPF app. |
 | `tests/PlexPod.Tests` | xUnit tests, including end-to-end syncs against a temporary folder standing in for the iPod. |
 
