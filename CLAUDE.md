@@ -2,7 +2,7 @@
 
 RockPlex is a **Windows desktop app (.NET 10, WPF, Fluent theme)** that syncs a **Plex Media Server music library** to an **iPod 5.5G (Video) 80 GB running Rockbox**. Plex is the source of truth. The iPod should show exactly what Plex shows.
 
-**Status (18 Oct 2026):** M1 is done and verified by the owner against the real server. **Milestone 2 (media pipeline) is implemented** (`docs/M2-plan.md`, owner decisions D1–D4 in its §8): it builds clean and all 189 tests pass, including real ffmpeg conversions. **Not yet checked by the owner:** a Test export of real albums (acceptance criteria 2–5, 7) and the on-iPod spike tests. The Plex JSON fixtures are still representative, not captured. Next: verify M2, then **Milestone 3** (sync engine).
+**Status (18 Oct 2026):** M1 is done and verified by the owner against the real server. **Milestone 2 (media pipeline) is implemented** (`docs/M2-plan.md`, owner decisions D1–D4 in its §8): it builds clean and all 189 tests pass, including real ffmpeg conversions. **Verified by the owner (18 Oct):** a 48-track Test export of the real library (16/44.1 copies, 24/96, 24/48 and 24/44.1 conversions, M4A, messy FLACs) with 0 failures and a working conversion cache. **Still open:** the on-iPod spike tests (pipeline doc §7: playback, art on the WPS, first-wins tags, UTF-8 paths). The Plex JSON fixtures are still representative, not captured. Next: verify M2, then **Milestone 3** (sync engine).
 
 ## Read these first
 | File | What's in it |
