@@ -27,14 +27,17 @@ public static class Adopter
     };
 
     /// <param name="unownedFiles">Device paths of files under /Music and /Playlists the manifest doesn't list.</param>
-    public static AdoptionResult Scan(string driveRoot, IReadOnlyCollection<string> unownedFiles, CancellationToken ct)
+    /// <param name="progress">Reports how many files have been looked at.</param>
+    public static AdoptionResult Scan(string driveRoot, IReadOnlyCollection<string> unownedFiles, CancellationToken ct, IProgress<int>? progress = null)
     {
         ArgumentNullException.ThrowIfNull(unownedFiles);
         var tracks = new List<ManifestTrack>();
         var playlists = new List<ManifestPlaylist>();
+        var seen = 0;
         foreach (var devicePath in unownedFiles)
         {
             ct.ThrowIfCancellationRequested();
+            progress?.Report(++seen);
             var ext = Path.GetExtension(devicePath);
             if (devicePath.StartsWith("/Music/", StringComparison.OrdinalIgnoreCase) && AudioExtensions.Contains(ext))
             {
@@ -103,7 +106,10 @@ public static class Adopter
             Guid = Field(TagSet.GuidKey) ?? string.Empty,
             PartId = partId,
             SizeBytes = new FileInfo(local).Length,
-            Sha256 = DeviceFileOps.HashFromDevice(local),
+
+            // No full-file hash here: reading every adopted file back over USB 2.0 made planning take minutes.
+            // The ID tags prove ownership, and every file RockPlex copies from now on is read back in full (D6).
+            Sha256 = string.Empty,
             TagHash = TagSet.HashFields(back.Fields),
             SourceComposer = Field(TagSet.ComposerKey),
             SourceComment = Field(TagSet.CommentKey),

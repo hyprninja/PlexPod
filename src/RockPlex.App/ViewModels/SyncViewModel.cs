@@ -130,7 +130,8 @@ public sealed partial class SyncViewModel(
         SyncPreview preview;
         try
         {
-            preview = await Task.Run(() => engine.PreviewAsync(request, stop), stop);
+            var planning = new Progress<string>(message => ProgressText = message);
+            preview = await Task.Run(() => engine.PreviewAsync(request, stop, planning), stop);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or HttpRequestException)
         {

@@ -1,3 +1,5 @@
+<img src="src/RockPlex.App/Assets/RockPlex.png" alt="RockPlex logo" width="96" align="right">
+
 # RockPlex
 
 Syncs a Plex Media Server music library to an iPod 5.5G (Video) running Rockbox. Plex is the source of truth.

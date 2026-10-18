@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -7,7 +7,13 @@
     <AssemblyName>RockPlex</AssemblyName>
     <RootNamespace>RockPlex.App</RootNamespace>
     <Version>0.1.0</Version>
+    <ApplicationIcon>Assets\RockPlex.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\RockPlex.ico" />
+    <Resource Include="Assets\RockPlex.png" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />

@@ -43,19 +43,23 @@ public sealed class SyncEngine(
 
     // ---------------------------------------------------------------- preview (read-only)
 
-    public async Task<SyncPreview> PreviewAsync(SyncRequest request, CancellationToken ct)
+    public async Task<SyncPreview> PreviewAsync(SyncRequest request, CancellationToken ct, IProgress<string>? progress = null)
     {
         ArgumentNullException.ThrowIfNull(request);
+        progress?.Report("Reading RockPlex's records on the iPod…");
         var root = request.DriveRoot;
         var store = new DeviceStore(root);
         var identity = await store.TryReadIdentityAsync(ct).ConfigureAwait(false);
         var (loaded, source) = await store.LoadManifestAsync(ct).ConfigureAwait(false);
         var manifest = loaded ?? DeviceManifest.Empty(identity?.DeviceId ?? string.Empty);
 
+        progress?.Report("Listing files on the iPod…");
         var listing = await Task.Run(() => DeviceFileOps.ListFiles(root, "Music", "Playlists"), ct).ConfigureAwait(false);
         var owned = OwnedPaths(manifest);
         var unowned = listing.Where(f => !owned.Contains(f)).ToList();
-        var adoption = await Task.Run(() => Adopter.Scan(root, unowned, ct), ct).ConfigureAwait(false);
+        var scanned = new Progress<int>(n => progress?.Report($"Checking files RockPlex doesn't know yet: {n:N0} of {unowned.Count:N0}…"));
+        var adoption = await Task.Run(() => Adopter.Scan(root, unowned, ct, scanned), ct).ConfigureAwait(false);
+        progress?.Report("Comparing with Plex…");
 
         var blockers = new List<string>();
         var targets = BuildTargets(request);
