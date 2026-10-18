@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Windows-only: uses WIC (System.Windows.Media.Imaging) for baseline JPEG album art. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="TagLibSharp" Version="2.3.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\PlexPod.Core\PlexPod.Core.csproj" />
+    <ProjectReference Include="..\PlexPod.Plex\PlexPod.Plex.csproj" />
+    <ProjectReference Include="..\PlexPod.Device\PlexPod.Device.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="PlexPod.Tests" />
+  </ItemGroup>
+
+</Project>

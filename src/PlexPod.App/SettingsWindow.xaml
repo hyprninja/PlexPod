@@ -1,0 +1,81 @@
+<Window x:Class="PlexPod.App.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="clr-namespace:PlexPod.App.ViewModels"
+        mc:Ignorable="d"
+        d:DataContext="{d:DesignInstance Type=vm:SettingsViewModel}"
+        Title="PlexPod settings" Width="620" Height="720" MinWidth="480" MinHeight="480"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False">
+
+    <Window.Resources>
+        <DataTemplate x:Key="FieldRow" DataType="{x:Type vm:TagFieldViewModel}">
+            <CheckBox IsChecked="{Binding IsOn}" Margin="0,2">
+                <TextBlock>
+                    <Run Text="{Binding DisplayName, Mode=OneWay}" />
+                </TextBlock>
+            </CheckBox>
+        </DataTemplate>
+    </Window.Resources>
+
+    <DockPanel Margin="16">
+        <Button DockPanel.Dock="Bottom" HorizontalAlignment="Right" Content="Close" MinWidth="90" IsCancel="True" IsDefault="True"
+                Margin="0,12,0,0" Click="OnClose" />
+
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <TextBlock Text="ffmpeg" FontWeight="SemiBold" FontSize="16" />
+                <TextBlock Text="Used to convert hi-res FLAC and to verify every file. PlexPod never downloads or bundles it."
+                           TextWrapping="Wrap" Opacity="0.75" Margin="0,2,0,6" />
+                <DockPanel>
+                    <Button DockPanel.Dock="Right" Content="Detect" Command="{Binding DetectCommand}" Margin="8,0,0,0" />
+                    <TextBox Text="{Binding FfmpegPath, UpdateSourceTrigger=PropertyChanged}"
+                             ToolTip="Leave empty to find ffmpeg automatically (PATH, then winget)."
+                             AutomationProperties.Name="ffmpeg path" />
+                </DockPanel>
+                <TextBlock Text="{Binding FfmpegStatus}" TextWrapping="Wrap" Margin="0,4,0,0" />
+
+                <TextBlock Text="Plays and ratings" FontWeight="SemiBold" FontSize="16" Margin="0,18,0,0" />
+                <CheckBox IsChecked="{Binding StatsReturn}" Margin="0,4,0,0"
+                          Content="Send plays and ratings from the iPod to Plex at every sync" />
+                <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="0,4,0,6"
+                           Text="Plays are recorded only with Rockbox's Settings → Playback Settings → Logging turned on, and count when at least 90% of the track was played. Ratings reach Plex after Settings → General Settings → Database → Export Modifications on the iPod. Rockbox's own files are only read, never changed." />
+                <StackPanel IsEnabled="{Binding StatsReturn}" Margin="0,0,0,0">
+                    <TextBlock Text="Ratings from the iPod" FontWeight="SemiBold" Margin="0,2,0,2" />
+                    <RadioButton GroupName="Ratings" IsChecked="{Binding RatingsIpodWins}" Margin="0,2"
+                                 Content="iPod changes win: a rating changed on the iPod replaces the one in Plex" />
+                    <RadioButton GroupName="Ratings" IsChecked="{Binding RatingsFillGapsOnly}" Margin="0,2"
+                                 Content="Only fill gaps: sent only for tracks with no rating in Plex" />
+                </StackPanel>
+
+                <TextBlock Text="Conversion cache" FontWeight="SemiBold" FontSize="16" Margin="0,18,0,0" />
+                <TextBlock Text="Converted hi-res files are kept so a tag change in Plex never re-converts. The oldest are removed above the cap."
+                           TextWrapping="Wrap" Opacity="0.75" Margin="0,2,0,6" />
+                <StackPanel Orientation="Horizontal">
+                    <TextBox Text="{Binding CacheCapGb, UpdateSourceTrigger=PropertyChanged}" Width="70" AutomationProperties.Name="Cache cap in GB" />
+                    <TextBlock Text="GB" VerticalAlignment="Center" Margin="6,0,12,0" />
+                    <TextBlock Text="{Binding CacheUsage}" VerticalAlignment="Center" Opacity="0.75" />
+                </StackPanel>
+
+                <DockPanel Margin="0,18,0,0">
+                    <Button DockPanel.Dock="Right" Content="Restore defaults" Command="{Binding RestoreDefaultsCommand}" />
+                    <TextBlock Text="Tags written to the iPod" FontWeight="SemiBold" FontSize="16" VerticalAlignment="Center" />
+                </DockPanel>
+                <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="0,2,0,6"
+                           Text="Every copy starts with all tags wiped. Unticked fields are left out entirely, so junk in them never reaches the iPod. Changes apply at the next sync or export." />
+                <TextBlock Text="{Binding CoreWarning}" TextWrapping="Wrap" Foreground="DarkOrange" Margin="0,0,0,6"
+                           Visibility="{Binding CoreWarning, Converter={StaticResource VisibleWhen}}" />
+
+                <TextBlock Text="From Plex" FontWeight="SemiBold" Margin="0,4,0,2" />
+                <ItemsControl ItemsSource="{Binding PlexFields}" ItemTemplate="{StaticResource FieldRow}" />
+
+                <TextBlock Text="Kept from the original file (Plex doesn't store these)" FontWeight="SemiBold" Margin="0,10,0,2" />
+                <ItemsControl ItemsSource="{Binding FileFields}" ItemTemplate="{StaticResource FieldRow}" />
+
+                <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="0,10,0,0"
+                           Text="PlexPod's own ID tags (PLEXPOD_RATINGKEY, PLEXPOD_GUID, PLEXPOD_PARTID) are always written. Syncing and play-count return depend on them, and Rockbox ignores them." />
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</Window>

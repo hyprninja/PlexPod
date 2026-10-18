@@ -1,12 +1,12 @@
-<img src="src/RockPlex.App/Assets/RockPlex.png" alt="RockPlex logo" width="96" align="right">
+<img src="src/PlexPod.App/Assets/PlexPod.png" alt="PlexPod logo" width="96" align="right">
 
-# RockPlex
+# PlexPod
 
 **Your Plex music library on an iPod running Rockbox, exactly as Plex shows it.**
 
-RockPlex is a Windows app that syncs music from a Plex Media Server to an iPod 5.5G (Video) running [Rockbox](https://www.rockbox.org). Pick playlists, artists and albums (or everything), press **Sync**, and the iPod ends up with the same titles, artists, album art and playlists you see in Plex. Each sync only changes what's different.
+PlexPod is a Windows app that syncs music from a Plex Media Server to an iPod 5.5G (Video) running [Rockbox](https://www.rockbox.org). Pick playlists, artists and albums (or everything), press **Sync**, and the iPod ends up with the same titles, artists, album art and playlists you see in Plex. Each sync only changes what's different.
 
-![RockPlex syncing playlists to an iPod](docs/images/rockplex-sync.png)
+![PlexPod syncing playlists to an iPod](docs/images/plexpod-sync.png)
 
 ## Features
 
@@ -18,7 +18,7 @@ RockPlex is a Windows app that syncs music from a Plex Media Server to an iPod 5
 ### Playlists that never break
 - Selecting a playlist brings **all** of its tracks along. A playlist is never half-copied and never points at a missing song.
 - Plex's **order and duplicates are kept**. Smart playlists are refreshed on every sync.
-- Your **own playlists and files on the iPod are never touched**; RockPlex only manages what it created.
+- Your **own playlists and files on the iPod are never touched**; PlexPod only manages what it created.
 
 ### Sound quality without waste
 - **Hi-res FLAC** (24-bit, 48–192 kHz) is converted down to **16-bit / 44.1 kHz** with a high-quality resampler (soxr) and dither. The iPod's hardware can't play above 48 kHz anyway, so this saves space and battery.
@@ -30,7 +30,7 @@ RockPlex is a Windows app that syncs music from a Plex Media Server to an iPod 5
 - Choose **exactly which tags** are written. Don't use genres? Switch them off, and the same for comments, composers, totals and more.
 - Album art from Plex, embedded in every track and saved as `cover.jpg` for Rockbox's PictureFlow (baseline JPEG, the format Rockbox can show).
 
-![RockPlex settings](docs/images/rockplex-settings.png)
+![PlexPod settings](docs/images/plexpod-settings.png)
 
 ### Syncs you can trust
 - **See the plan first:** what will be added, updated, moved and removed, and the free space afterwards. Nothing changes until you confirm.
@@ -45,17 +45,17 @@ RockPlex is a Windows app that syncs music from a Plex Media Server to an iPod 5
 - Windows 10 or 11, and the [.NET 10 SDK](https://dotnet.microsoft.com/download) to build it (there's no installer yet)
 - A Plex Media Server with a music library
 - An iPod 5.5G (Video) with Rockbox, connected in disk mode
-- **ffmpeg** with soxr: `winget install Gyan.FFmpeg`. RockPlex finds it automatically.
+- **ffmpeg** with soxr: `winget install Gyan.FFmpeg`. PlexPod finds it automatically.
 
 **Run it**
 ```bash
-git clone https://github.com/hyprninja/RockPlex.git
-cd RockPlex
-dotnet run --project src/RockPlex.App
+git clone https://github.com/hyprninja/PlexPod.git
+cd PlexPod
+dotnet run --project src/PlexPod.App
 ```
 
-1. **Sign in with Plex.** Your browser opens Plex's own sign-in page; RockPlex never sees your password.
-2. RockPlex finds your server and loads your music library.
+1. **Sign in with Plex.** Your browser opens Plex's own sign-in page; PlexPod never sees your password.
+2. PlexPod finds your server and loads your music library.
 3. Plug in the iPod. It appears with its free space.
 4. Tick what you want and watch the capacity bar.
 5. Press **Sync**, check the plan, and start. When it's done, run **Database → Update Now** on the iPod.
@@ -71,13 +71,13 @@ dotnet run --project src/RockPlex.App
 
 ## Privacy and security
 - Your Plex token is stored encrypted for your Windows account (DPAPI) and is never written to logs. Your **account** token only ever goes to plex.tv over HTTPS; your server only receives its own access token.
-- If your router blocks Plex's secure `plex.direct` addresses, RockPlex falls back to plain HTTP on your local network, so the server token travels unencrypted there. Enter an `https://` address under **Server address** in the main window to avoid that.
-- RockPlex only writes to `/Music`, `/Playlists` and its own `/.rockplex` folder on the iPod, and treats everything it reads from the iPod as untrusted.
+- If your router blocks Plex's secure `plex.direct` addresses, PlexPod falls back to plain HTTP on your local network, so the server token travels unencrypted there. Enter an `https://` address under **Server address** in the main window to avoid that.
+- PlexPod only writes to `/Music`, `/Playlists` and its own `/.plexpod` folder on the iPod, and treats everything it reads from the iPod as untrusted.
 
 ## For developers
 ```bash
-dotnet build RockPlex.slnx -c Debug
-dotnet test  RockPlex.slnx
+dotnet build PlexPod.slnx -c Debug
+dotnet test  PlexPod.slnx
 ```
 .NET 10, WPF with the Fluent theme, CommunityToolkit.Mvvm, TagLibSharp and ffmpeg. Design notes and milestone plans are in [`docs/`](docs/) and [`CLAUDE.md`](CLAUDE.md).
 
@@ -86,12 +86,12 @@ dotnet test  RockPlex.slnx
 
 | Project | What it does |
 |---|---|
-| `src/RockPlex.Core` | Models, format policy, size estimates, selection, tag mapping, sync planner, fit check, playlist writer. No packages, no I/O. |
-| `src/RockPlex.Plex` | Plex sign-in, server discovery, library and playlist reads. |
-| `src/RockPlex.Device` | Rockbox detection, on-iPod state (`/.rockplex/`), verified copies, playlist checks. |
-| `src/RockPlex.Media` | Download, conversion (ffmpeg/soxr), tag rewrite (TagLibSharp), artwork (WIC), verification, Test export, sync engine. |
-| `src/RockPlex.App` | The WPF app. |
-| `tests/RockPlex.Tests` | xUnit tests, including end-to-end syncs against a temporary folder standing in for the iPod. |
+| `src/PlexPod.Core` | Models, format policy, size estimates, selection, tag mapping, sync planner, fit check, playlist writer. No packages, no I/O. |
+| `src/PlexPod.Plex` | Plex sign-in, server discovery, library and playlist reads. |
+| `src/PlexPod.Device` | Rockbox detection, on-iPod state (`/.plexpod/`), verified copies, playlist checks. |
+| `src/PlexPod.Media` | Download, conversion (ffmpeg/soxr), tag rewrite (TagLibSharp), artwork (WIC), verification, Test export, sync engine. |
+| `src/PlexPod.App` | The WPF app. |
+| `tests/PlexPod.Tests` | xUnit tests, including end-to-end syncs against a temporary folder standing in for the iPod. |
 
-App data lives in `%LOCALAPPDATA%\RockPlex\` (settings, encrypted token, logs and a conversion cache capped at 20 GB).
+App data lives in `%LOCALAPPDATA%\PlexPod\` (settings, encrypted token, logs and a conversion cache capped at 20 GB).
 </details>

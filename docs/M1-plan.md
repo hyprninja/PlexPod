@@ -2,30 +2,30 @@
 
 **Goal:** a WPF app that signs in to Plex, finds the server and music library, loads artists, albums, tracks and playlists, detects the Rockbox iPod, and lets the user build a selection (All songs / Playlists / Artists / Albums) with a **live capacity bar**. **Read-only: nothing is written to the iPod.**
 
-Decisions and invariants are in `../CLAUDE.md`. The selection rules come from `../RockPlex-Selection-and-Playlists.md` §2 and §5.
+Decisions and invariants are in `../CLAUDE.md`. The selection rules come from `../PlexPod-Selection-and-Playlists.md` §2 and §5.
 
 ---
 
 ## 1. Solution layout
 
 ```
-RockPlex.slnx
+PlexPod.slnx
 Directory.Build.props        # net10.0, Nullable, ImplicitUsings, TreatWarningsAsErrors, LangVersion latest
 global.json                  # SDK 10.0.x, rollForward latestFeature
 .editorconfig  .gitignore  README.md
 src/
-  RockPlex.Core/             # net10.0, NO package refs, no I/O
-  RockPlex.Plex/             # net10.0, Microsoft.Extensions.Http
-  RockPlex.Device/           # net10.0
-  RockPlex.App/              # net10.0-windows, UseWPF, CommunityToolkit.Mvvm, Microsoft.Extensions.Hosting
+  PlexPod.Core/             # net10.0, NO package refs, no I/O
+  PlexPod.Plex/             # net10.0, Microsoft.Extensions.Http
+  PlexPod.Device/           # net10.0
+  PlexPod.App/              # net10.0-windows, UseWPF, CommunityToolkit.Mvvm, Microsoft.Extensions.Hosting
 tests/
-  RockPlex.Tests/            # net10.0, xUnit; covers Core, Plex, Device
+  PlexPod.Tests/            # net10.0, xUnit; covers Core, Plex, Device
 ```
 Dependencies only point inward: App → Plex, Device → Core.
 
 ---
 
-## 2. RockPlex.Core
+## 2. PlexPod.Core
 
 **Models** (records, immutable):
 - `ArtistItem(RatingKey, Guid, Title, ThumbPath?)`
@@ -52,17 +52,17 @@ Dependencies only point inward: App → Plex, Device → Core.
   - **Playlist completeness:** every available entry of a selected playlist is included. Unavailable entries are reported, never silently dropped.
   - Output: `TrackKeys`, `TotalEstimatedBytes`, `IsEstimateExact`, per-source counts (from playlists / artists / albums / all), `UnavailablePlaylistEntries`, `ConversionCount`, `UnknownFormatCount`.
   - Stale refs (an item no longer in Plex): match by RatingKey first, then by Guid; otherwise report the ref as missing.
-- `CapacityCalculator(DeviceCapacity, ResolvedSelection) → { AvailableBytes, SelectedBytes, Fits, OverBy }`. In M1, available = device free space (no manifest yet; M3 adds space taken by RockPlex-managed files).
+- `CapacityCalculator(DeviceCapacity, ResolvedSelection) → { AvailableBytes, SelectedBytes, Fits, OverBy }`. In M1, available = device free space (no manifest yet; M3 adds space taken by PlexPod-managed files).
 
 ---
 
-## 3. RockPlex.Plex
+## 3. PlexPod.Plex
 
 - `PlexClientOptions`: Product, Version, ClientIdentifier (stable GUID created on first run and saved in settings), DeviceName.
 - `PlexHeadersHandler : DelegatingHandler` adds the `X-Plex-*` headers and `Accept: application/json`, plus `X-Plex-Token` when a token provider supplies one.
 - `IPlexAuthService` / `PlexAuthService` (plex.tv):
   - `CreatePinAsync()` → `PlexPin(Id, Code, ExpiresAt)`. `POST https://plex.tv/api/v2/pins?strong=true`.
-  - `BuildAuthUrl(pin)` → `https://app.plex.tv/auth#?clientID=…&code=…&context%5Bdevice%5D%5Bproduct%5D=RockPlex`.
+  - `BuildAuthUrl(pin)` → `https://app.plex.tv/auth#?clientID=…&code=…&context%5Bdevice%5D%5Bproduct%5D=PlexPod`.
   - `PollForTokenAsync(pin, ct)` → token. `GET https://plex.tv/api/v2/pins/{id}?code={code}` every ~1 s until `authToken` is set or the PIN expires (then throw `PinExpiredException`).
   - `ValidateTokenAsync(token)` → `Valid | Invalid | Unreachable`. `GET https://plex.tv/api/v2/user`: 200 / 401 / other.
 - `IPlexServerDiscovery`:
@@ -79,7 +79,7 @@ Dependencies only point inward: App → Plex, Device → Core.
 
 ---
 
-## 4. RockPlex.Device
+## 4. PlexPod.Device
 
 - `RockboxDevice(DriveRoot, VolumeLabel, TotalBytes, FreeBytes, RockboxTarget?, RockboxVersion?)`.
 - `IRockboxDeviceLocator.FindDevices()` scans `DriveInfo.GetDrives()` (IsReady; skip Network/CDRom) for a root containing `.rockbox`.
@@ -90,14 +90,14 @@ Dependencies only point inward: App → Plex, Device → Core.
 
 ---
 
-## 5. RockPlex.App (WPF)
+## 5. PlexPod.App (WPF)
 
 **Hosting:** `App.xaml.cs` builds a generic host, registers services and view models, and shows `MainWindow`. Unhandled exceptions are logged and shown in a dialog.
 
 **Theme:** merge `pack://application:,,,/PresentationFramework.Fluent;component/Themes/Fluent.xaml` in `App.xaml` (follows system light/dark). Avoid the experimental `ThemeMode` API unless it is no longer experimental in .NET 10.
 
 **Services:**
-- `SettingsStore`: JSON at `%LOCALAPPDATA%\RockPlex\settings.json` (ClientIdentifier, ServerMachineId, ServerUrlOverride, SectionKey, SelectionProfile).
+- `SettingsStore`: JSON at `%LOCALAPPDATA%\PlexPod\settings.json` (ClientIdentifier, ServerMachineId, ServerUrlOverride, SectionKey, SelectionProfile).
 - `TokenStore`: DPAPI `ProtectedData.Protect` (CurrentUser) → `token.bin`.
 - `BrowserLauncher`: `Process.Start(new ProcessStartInfo(url) { UseShellExecute = true })`.
 - Simple rolling file log in `logs\` (never logs tokens; redact `X-Plex-Token` in URLs).
@@ -131,7 +131,7 @@ Dependencies only point inward: App → Plex, Device → Core.
 
 ---
 
-## 6. Tests (xUnit, `tests/RockPlex.Tests`)
+## 6. Tests (xUnit, `tests/PlexPod.Tests`)
 - **FormatPolicy:** 16/44.1 → Copy; 16/48 → 16/44.1; 24/44.1 → 16/44.1; 24/96 → 16/44.1; 16/32 → Copy; 24/32 → 16/32; 8/22.05 → Copy; MP3/AAC/ALAC hi-res → Copy; FLAC unknown → UnknownFlac. Property check: output rate/bits never exceed the input.
 - **SizeEstimator:** ratios for each case; unknown → part size; exact flag.
 - **SelectionResolver:** union and dedupe (album + its artist counted once); All songs; playlist with duplicates; unavailable entries reported; stale ref matched by Guid; empty selection.
@@ -139,7 +139,7 @@ Dependencies only point inward: App → Plex, Device → Core.
 - **Plex:** PIN create → poll (null, null, token) → token; expired PIN throws; validate 200/401/500; resources parsing and connection ordering (relay excluded, override wins); paging over 3 pages joins correctly; track mapping (string ratingKey, missing Media → unavailable); playlist items keep order and duplicates; the token is never present in logged URLs.
 - **Device:** a temp dir with `.rockbox` is detected, a dir without it isn't; rockbox-info parsing (normal, missing, junk lines).
 
-JSON fixtures live in `tests/RockPlex.Tests/Fixtures/`. Mark them as **representative**, and replace them with captured real responses (token redacted) once a real server is available.
+JSON fixtures live in `tests/PlexPod.Tests/Fixtures/`. Mark them as **representative**, and replace them with captured real responses (token redacted) once a real server is available.
 
 ---
 

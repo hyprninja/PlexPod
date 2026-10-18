@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>PlexPod</AssemblyName>
+    <RootNamespace>PlexPod.App</RootNamespace>
+    <Version>0.1.0</Version>
+    <ApplicationIcon>Assets\PlexPod.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\PlexPod.ico" />
+    <Resource Include="Assets\PlexPod.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\PlexPod.Core\PlexPod.Core.csproj" />
+    <ProjectReference Include="..\PlexPod.Plex\PlexPod.Plex.csproj" />
+    <ProjectReference Include="..\PlexPod.Device\PlexPod.Device.csproj" />
+    <ProjectReference Include="..\PlexPod.Media\PlexPod.Media.csproj" />
+  </ItemGroup>
+
+</Project>

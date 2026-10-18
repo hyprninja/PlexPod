@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/PlexPod.App/PlexPod.App.csproj" />
+    <Project Path="src/PlexPod.Core/PlexPod.Core.csproj" />
+    <Project Path="src/PlexPod.Device/PlexPod.Device.csproj" />
+    <Project Path="src/PlexPod.Media/PlexPod.Media.csproj" />
+    <Project Path="src/PlexPod.Plex/PlexPod.Plex.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/PlexPod.Tests/PlexPod.Tests.csproj" />
+  </Folder>
+</Solution>

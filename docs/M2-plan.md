@@ -2,9 +2,9 @@
 
 **Goal:** turn one selected Plex track into the exact file the iPod should hold: downloaded from Plex, converted only when the format rule says so, every old tag and picture wiped, one clean tag set written from Plex, album art embedded, and the result verified. Albums also get a `cover.jpg`.
 
-**Still nothing is written to the iPod.** M2 output goes to a folder on the PC through a **Test export** command, so the spike tests (`../RockPlex-Media-Pipeline.md` §7) can be run by copying the result to the iPod by hand. Writing to the device, the manifest and the Sync button belong to M3.
+**Still nothing is written to the iPod.** M2 output goes to a folder on the PC through a **Test export** command, so the spike tests (`../PlexPod-Media-Pipeline.md` §7) can be run by copying the result to the iPod by hand. Writing to the device, the manifest and the Sync button belong to M3.
 
-Decisions and invariants are in `../CLAUDE.md`. The design is `../RockPlex-Media-Pipeline.md` (§3 format, §4 tags and naming, §5 art).
+Decisions and invariants are in `../CLAUDE.md`. The design is `../PlexPod-Media-Pipeline.md` (§3 format, §4 tags and naming, §5 art).
 
 ---
 
@@ -12,12 +12,12 @@ Decisions and invariants are in `../CLAUDE.md`. The design is `../RockPlex-Media
 
 ```
 src/
-  RockPlex.Core/     + TagSet, TagPolicy, TagMapper, DevicePathBuilder, FlacStreamInfo (pure; still no packages, no I/O)
-  RockPlex.Plex/     + downloads, album/artist detail, art download
-  RockPlex.Media/    NEW  net10.0-windows: TagLibSharp, ffmpeg runner, WIC art encoder, pipeline, cache
-  RockPlex.App/      + Test export command, ffmpeg settings, export report
+  PlexPod.Core/     + TagSet, TagPolicy, TagMapper, DevicePathBuilder, FlacStreamInfo (pure; still no packages, no I/O)
+  PlexPod.Plex/     + downloads, album/artist detail, art download
+  PlexPod.Media/    NEW  net10.0-windows: TagLibSharp, ffmpeg runner, WIC art encoder, pipeline, cache
+  PlexPod.App/      + Test export command, ffmpeg settings, export report
 tests/
-  RockPlex.Tests/    → net10.0-windows (Media uses WIC); + tiny FLAC/MP3/M4A fixtures
+  PlexPod.Tests/    → net10.0-windows (Media uses WIC); + tiny FLAC/MP3/M4A fixtures
 ```
 Dependencies: App → Media → Plex, Core. Media is Windows-only because it uses WIC (`System.Windows.Media.Imaging`) for baseline JPEGs, which adds no package. The app is Windows-only anyway (owner decision 1).
 
@@ -25,9 +25,9 @@ New package: **TagLibSharp** (LGPL-2.1, used as an unmodified library). **No ffm
 
 ---
 
-## 2. RockPlex.Core (pure)
+## 2. PlexPod.Core (pure)
 
-- **`TagSet`** (record): Title, Artist, AlbumArtist, Album, TrackNumber?, TrackTotal?, DiscNumber?, DiscTotal?, Date?, Genre?, Grouping?, Compilation, Label?, Composer?, MusicBrainzTrackId?, ReplayGain? (track/album gain and peak), RockPlexRatingKey, RockPlexGuid, RockPlexPartId. Plus `ContentHash()`, a stable hash of everything written. M3 uses it to detect tag-only changes.
+- **`TagSet`** (record): Title, Artist, AlbumArtist, Album, TrackNumber?, TrackTotal?, DiscNumber?, DiscTotal?, Date?, Genre?, Grouping?, Compilation, Label?, Composer?, MusicBrainzTrackId?, ReplayGain? (track/album gain and peak), PlexPodRatingKey, PlexPodGuid, PlexPodPartId. Plus `ContentHash()`, a stable hash of everything written. M3 uses it to detect tag-only changes.
 - **`TagPolicy`** (record; D4): one switch **per tag field** saying whether it is written. Every field the iPod could show is covered, so any of them can be stripped when its data is junk:
 
   | Field | Source | Default |
@@ -50,7 +50,7 @@ New package: **TagLibSharp** (LGPL-2.1, used as an unmodified library). **No ffm
   | Comment | **Kept from the original file** | Strip |
 
   - Every field can be switched off, including the core ones (title, artist, album, album artist, track number). Switching off a core field shows a warning in Settings, because Rockbox's database then files those tracks under *&lt;Untagged&gt;*.
-  - **Not user-facing and always written:** `ROCKPLEX_RATINGKEY`, `ROCKPLEX_GUID`, `ROCKPLEX_PARTID`. M3 rebuilds the manifest from them and M4 maps plays back to Plex through them, so stripping them would break syncing. Rockbox ignores them.
+  - **Not user-facing and always written:** `PLEXPOD_RATINGKEY`, `PLEXPOD_GUID`, `PLEXPOD_PARTID`. M3 rebuilds the manifest from them and M4 maps plays back to Plex through them, so stripping them would break syncing. Rockbox ignores them.
   - "Strip" means the field is absent from the file, never written as an empty value. Since every sync wipes all tags first, a field switched off later disappears from the iPod copies at the next sync.
   - The policy is part of `TagSet.ContentHash()`, so changing a switch makes M3 re-tag the affected files (tags only; no audio is copied again).
 - **`TagMapper.Map(TrackItem, AlbumDetail, ArtistDetail?, SourceTags, TagPolicy) → TagSet`**, following the table in pipeline §4.2. Fields the policy strips are left null:
@@ -69,7 +69,7 @@ New package: **TagLibSharp** (LGPL-2.1, used as an unmodified library). **No ffm
 - **`FlacStreamInfo.Parse(ReadOnlySpan<byte>)`**: reads the `fLaC` marker and the STREAMINFO block (min/max block size, sample rate, channels, bits per sample, total samples, audio MD5) and reports where the audio frames start. M2 makes its final format decision from **the downloaded file itself**, not from Plex metadata (the M1 enricher's 16/44.1 assumption for low-bitrate FLAC is never trusted here).
 - **`FinalFormatPolicy.Decide(FlacStreamInfo)`**: `FormatPolicy`'s rule (min(bits, 16) / min(rate, 44100), never raised) plus the block-size safety net: a 16/44.1 file with max block size > 4608 → `ReencodeLossless` (FLAC → FLAC, 4096-sample frames, bit-identical audio).
 
-## 3. RockPlex.Plex
+## 3. PlexPod.Plex
 
 - `DownloadPartAsync(MediaPartRef, Stream destination, IProgress<long>?, ct)` → `GET {server}{Part.key}?download=1`, with the token in the header (never in the URL). Read-only. Checks the byte count against `Part.size` when Plex supplies it.
 - `GetAlbumDetailAsync(albumKey)` → `/library/metadata/{albumKey}`: `Genre[]`, `Style[]`, `studio`, `originallyAvailableAt`, `year`, `leafCount`, `thumb`.
@@ -78,7 +78,7 @@ New package: **TagLibSharp** (LGPL-2.1, used as an unmodified library). **No ffm
 - `DownloadImageAsync(thumbPath)` → full-size bytes of the album poster that is selected in Plex.
 - Fixtures for album detail, artist detail and a track with guids and gain (representative, as in M1).
 
-## 4. RockPlex.Media (new)
+## 4. PlexPod.Media (new)
 
 ### 4.1 ffmpeg
 - **`FfmpegLocator`** looks, in order, at: the path in settings, `PATH`, then the winget install folder. It checks `ffmpeg -version` for `--enable-libsoxr`; without soxr, conversions are refused with a clear message (copies still work).
@@ -113,20 +113,20 @@ Clean slate, then one canonical set:
 - **Conversion cache:** converted outputs, *before* tagging, are kept in `cache\converted\` keyed by `partId + updatedAt + profileVersion`, so a tag change in Plex never re-converts. Copies are not cached (they're just re-downloaded). Default cap: **20 GB**, least-recently-used eviction (setting).
 - Concurrency: 2 downloads and 1 conversion at a time (settings). Everything is cancellable and resumes cleanly; a half-done file is never left under a final name.
 
-## 5. RockPlex.App
+## 5. PlexPod.App
 
-- **Test export…** button (enabled when something is selected): pick a folder → process the selected tracks → write `<folder>\Music\…` plus `cover.jpg` per album, a `RockPlex-export.txt` report (per track: copied / converted 24/96 → 16/44.1 / re-encoded / not re-tagged / failed + reason), and `.m3u8` copies of the selected playlists so the spike tests can check them.
+- **Test export…** button (enabled when something is selected): pick a folder → process the selected tracks → write `<folder>\Music\…` plus `cover.jpg` per album, a `PlexPod-export.txt` report (per track: copied / converted 24/96 → 16/44.1 / re-encoded / not re-tagged / failed + reason), and `.m3u8` copies of the selected playlists so the spike tests can check them.
 - **Refuses the iPod's drive** (any drive with `.rockbox`): the manifest rule means only M3's sync engine may write there. You copy the test files across by hand.
 - Progress: overall bar, current track, and a Cancel button. Errors are listed, never shown one dialog per track.
 - Settings: ffmpeg path (with a "Detect" button and a status line such as "ffmpeg 9.0.2 with soxr ✓") and the conversion-cache cap.
-- **Tags written to the iPod** (D4): a checklist with one row per `TagPolicy` field, in two groups ("From Plex" and "Kept from the original file"), plus **Restore defaults**. Switching off a core field shows the *&lt;Untagged&gt;* warning inline. A note explains that RockPlex's own ID tags are always written. Saved in `settings.json`; the Test export report lists the policy that was used.
+- **Tags written to the iPod** (D4): a checklist with one row per `TagPolicy` field, in two groups ("From Plex" and "Kept from the original file"), plus **Restore defaults**. Switching off a core field shows the *&lt;Untagged&gt;* warning inline. A note explains that PlexPod's own ID tags are always written. Saved in `settings.json`; the Test export report lists the policy that was used.
 - The capacity summary shows **real** sizes for anything already in the conversion cache.
 
 ## 6. Tests
 
 - **Core:** TagMapper (artist fallback, compilation, date fallback, totals per disc, empty values dropped, every TagPolicy switch on and off (a stripped field is absent, not empty), genre never joined, composer/comment carry-over only when kept, identity tags written even with every switch off, policy change → different ContentHash, no ReplayGain keys); DevicePathBuilder (illegal characters, reserved names, trailing dots, length caps, NFC, multi-disc prefix); FlacStreamInfo (fixture headers, a truncated header, not-FLAC); FinalFormatPolicy (the full M1 matrix plus the block-size rule; property check that nothing is ever raised).
 - **Plex:** download writes the exact bytes and sends the token in the header only; size mismatch throws; album/artist detail mapping; guids and gain parsing.
-- **Media (unit):** TagWriter on tiny committed fixtures (FLAC, MP3, M4A) that start out *messy* (duplicate ARTIST, ID3 glued onto FLAC, three pictures) → exactly one clean set and one picture afterwards, and with every policy switch off only the ROCKPLEX_* keys remain; ArtProcessor produces a baseline JPEG (no SOF2 marker) of the right size and pads non-square art.
+- **Media (unit):** TagWriter on tiny committed fixtures (FLAC, MP3, M4A) that start out *messy* (duplicate ARTIST, ID3 glued onto FLAC, three pictures) → exactly one clean set and one picture afterwards, and with every policy switch off only the PLEXPOD_* keys remain; ArtProcessor produces a baseline JPEG (no SOF2 marker) of the right size and pads non-square art.
 - **Media (integration, `[FfmpegFact]`, skipped with a reason when ffmpeg isn't found):** generated 24/96 → 16/44.1; 24/32 → 16/32 (rate kept); 16/44.1 → bit-perfect copy (audio MD5 equal); 16/22.05 → copied, never upsampled; block size 8192 → lossless re-encode with an identical MD5; cancellation kills ffmpeg and leaves no output file.
 - **Pipeline:** a fake Plex download plus real TagWriter/ArtProcessor → final file, report line, cache hit on the second run.
 
@@ -147,7 +147,7 @@ Clean slate, then one canonical set:
 | D1 | **Genre** | **First Plex genre only**, never joined. Can be stripped entirely through D4 (the owner doesn't use genres). |
 | D2 | **ReplayGain** | **Skipped in M2.** Revisit after spike test 4 has checked Plex's units. |
 | D3 | **Carry-over allow-list** | **`COMPOSER`** kept from the source file by default; **`COMMENT`** available but off by default. Everything else from the source is always dropped. |
-| D4 | **Per-tag stripping** | **Every tag field has its own write/strip switch** (§2 `TagPolicy`, §5 settings), because source data for many fields is junk. Only RockPlex's internal ID tags are exempt. |
+| D4 | **Per-tag stripping** | **Every tag field has its own write/strip switch** (§2 `TagPolicy`, §5 settings), because source data for many fields is junk. Only PlexPod's internal ID tags are exempt. |
 
 ## 9. Out of scope for M2
 Writing to the iPod, the manifest, collision renaming, the real `.m3u8` writer with its guarantees (M3); stats (M4); lyrics `.lrc` sidecars; computing ReplayGain locally with `rsgain`.
