@@ -4,12 +4,12 @@ PlexPod is a **Windows desktop app (.NET 10, WPF, Fluent theme)** that syncs a *
 
 **Renamed (18 Oct 2026):** the app was called **RockPlex** until M4. Code, docs, the exe and the GitHub repo (`hyprninja/PlexPod`) use the new name; the local checkout folder may still be called `RockPlex`.
 
-**Status (18 Oct 2026):** M1, M2 and **M3 are done** and verified by the owner on the real library and iPod: a full sync of several playlists (~870 tracks, hi-res conversions, M4A, adopted test-export files), followed by a full bug/security review and fixes (path confinement, manifest reconciliation, token scoping, art and download robustness). **M4 (stats return) is implemented** per `docs/M4-plan.md` (owner decisions D8–D11 in its §9): builds clean, 350 tests pass (after a second full code review on 18 Oct), including end-to-end syncs against a temp-folder iPod and a fake Plex (plays sent before removals, Plex outage resumes, rotated logs, ratings modes, Send plays now). **Not yet checked by the owner:** plays and ratings reaching the real Plex server from the real iPod (acceptance criteria 2–6). The Plex JSON fixtures are still representative, not captured. The owner has since restored the iPod to stock **iPod OS 1.3** because Rockbox can't talk to the car (the stock firmware can), so M4 is unverified on Rockbox for now. **M6 is implemented** (392 tests): PlexPod detects stock or Rockbox and runs the matching workflow. **Next: the first real stock sync** (M6 Phase 4: a small selection, check on the iPod, then in the car).
+**Status (18 Oct 2026):** M1, M2 and **M3 are done** and verified by the owner on the real library and iPod: a full sync of several playlists (~870 tracks, hi-res conversions, M4A, adopted test-export files), followed by a full bug/security review and fixes (path confinement, manifest reconciliation, token scoping, art and download robustness). **M4 (stats return) is implemented** per `docs/M4-plan.md` (owner decisions D8–D11 in its §9): builds clean, 350 tests pass (after a second full code review on 18 Oct), including end-to-end syncs against a temp-folder iPod and a fake Plex (plays sent before removals, Plex outage resumes, rotated logs, ratings modes, Send plays now). **Not yet checked by the owner:** plays and ratings reaching the real Plex server from the real iPod (acceptance criteria 2–6). The Plex JSON fixtures are still representative, not captured. The owner has since restored the iPod to stock **iPod OS 1.3** because Rockbox can't talk to the car (the stock firmware can), so M4 is unverified on Rockbox for now. **M6 is done** (392 tests): PlexPod detects stock or Rockbox and runs the matching workflow. Verified by the owner: a playlist synced to the stock iPod played in the car first try. Still to observe on the device: covers, Play Counts → Plex, a larger library.
 
 ## Read these first
 | File | What's in it |
 |---|---|
-| `docs/M6-plan.md` | Milestone 6 (implemented, first real sync pending): stock Apple firmware (for the car) alongside Rockbox, detected automatically: iTunesDB, Fxx layout, ALAC, Play Counts, artwork; owner decisions D12–D15 |
+| `docs/M6-plan.md` | Milestone 6 (done, verified in the car): stock Apple firmware (for the car) alongside Rockbox, detected automatically: iTunesDB, Fxx layout, ALAC, Play Counts, artwork; owner decisions D12–D15 |
 | `docs/M4-plan.md` | Milestone 4 (implemented, owner verification pending): stats return, Rockbox playback log + database changelog → Plex plays and ratings, owner decisions D8–D11 |
 | `docs/M3-plan.md` | Milestone 3 (done): sync engine, manifest, playlist guarantees, owner decisions D5–D7 |
 | `docs/M2-plan.md` | Milestone 2 (done): media pipeline, owner decisions D1–D4 |
@@ -72,7 +72,7 @@ dotnet run --project src/PlexPod.App
 | M2 | ✅ done. Media pipeline: download original part, FLAC conversion (ffmpeg/soxr), tag wipe and rewrite (TagLibSharp), album art (baseline JPEG, embedded + `cover.jpg`) |
 | M3 | ✅ done. Sync engine: device manifest, add/re-tag/remove, `.m3u8` playlists with guarantees, interrupt safety, fit-check gate, `/.plexpod/selection.json` on the iPod |
 | M4 | ✅ implemented, owner verification pending. Stats return: Rockbox playback log + database changelog → Plex scrobble/rate, step 0 of every sync, Send plays now |
-| **M6** | **← verify next.** Implemented: stock Apple firmware alongside Rockbox, detected automatically (`docs/M6-plan.md`) |
+| M6 | ✅ done, verified in the car. Stock Apple firmware alongside Rockbox, detected automatically (`docs/M6-plan.md`) |
 | M5 | Polish (after M6): tray, auto-sync on plug-in, Last.fm forwarding (from `stats\<device>\plays.jsonl`), optional "appears on" artist scope |
 
 ## Technical cheat-sheet

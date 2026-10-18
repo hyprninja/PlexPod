@@ -1,6 +1,6 @@
 # Milestone 6: Stock Firmware — Two Workflows, Detected Automatically
 
-**Status:** implemented (phases 1–3, 5, 6; 392 tests green), owner decisions D12–D15 (§11). Phase 0 (hardware) passed on 18 Oct 2026. **Phase 4, the first real sync on the iPod and in the car, is next.**
+**Status:** implemented and **verified by the owner on 18 Oct 2026**: a playlist synced to the iPod 5.5G on iPod OS 1.3 played in the car first try. Owner decisions D12–D15 in §11. Still to observe on the real device: covers, plays and ratings coming back through Play Counts, and a larger library.
 
 **Goal:** PlexPod syncs the same Plex selection to an iPod running **either** Rockbox **or** Apple's
 stock firmware, works out which one is plugged in, and runs the matching workflow. The stock
@@ -139,7 +139,7 @@ touches iTunes itself.
 | 1 | Detection + target model ✅ | `IpodLocator` reports the firmware; the app shows it; Rockbox path unchanged |
 | 2 | `Core/ItunesDb` writer + parser ✅ | Pure; libgpod's layout (version 0x30, 8 sections, sort indexes); reader checked against a real iTunes-written database and libgpod's parser offsets |
 | 3 | Stock sync engine ✅ | `iPod_Control/Music/Fnn`, Apple Lossless verified sample-for-sample (D12), database rebuilt from the manifest and swapped in, never listing a file being removed, P1 via the previous version, leftovers removed (D13) |
-| 4 | **First real sync** | A small selection; check on the iPod's screen, then in the car |
+| 4 | First real sync ✅ | A playlist synced and played in the car first try (18 Oct 2026) |
 | 5 | Play Counts → Plex ✅ | Built with phase 3 (it has to be: Play Counts is tied to the database being replaced). Matched by position, folded into the manifest, pending plays kept, file deleted (D14) |
 | 6 | Artwork ✅ | ArtworkDB + `F1028`/`F1029` RGB565 thumbnails, per track; rewritten to the other file index only when covers change |
 
