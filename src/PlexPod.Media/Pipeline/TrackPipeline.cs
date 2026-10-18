@@ -1,6 +1,8 @@
 using Microsoft.Extensions.Logging;
+using PlexPod.Core.ItunesDb;
 using PlexPod.Core.Media;
 using PlexPod.Core.Models;
+using PlexPod.Device;
 using PlexPod.Core.Tagging;
 using PlexPod.Media.Art;
 using PlexPod.Media.Ffmpeg;
@@ -19,7 +21,11 @@ public sealed record TrackJob(
     ArtImages? Art,
     TagPolicy Policy,
     string OutputPath,
-    string? FailedSourceFolder = null);
+    string? FailedSourceFolder = null,
+    IpodFirmware Target = IpodFirmware.Rockbox);
+
+/// <summary>What the stock firmware's database needs to know about the file (M6).</summary>
+public sealed record AudioFacts(ItdbFileKind? Kind, uint LengthMs, uint Bitrate, uint SampleRate, (uint Pregap, uint Postgap, ulong SampleCount)? Gapless);
 
 public sealed record ProcessedTrack(
     string OutputPath,
@@ -28,7 +34,13 @@ public sealed record ProcessedTrack(
     string TagHash,
     long SizeBytes,
     bool FromCache,
-    SourceTags SourceTags);
+    SourceTags SourceTags)
+{
+    public AudioFacts Audio { get; init; } = new(null, 0, 0, 0, null);
+
+    /// <summary>The tags written (for the stock firmware's database).</summary>
+    public TagSet? Tags { get; init; }
+}
 
 /// <summary>The track couldn't be processed; nothing was written to its output path.</summary>
 public sealed class PipelineException(string message, Exception? inner = null) : Exception(message, inner);
@@ -70,7 +82,35 @@ public sealed class TrackPipeline(
             string staged;
             string? untaggedReference = null;
             var fromCache = false;
-            if (action is FlacAction.Copy)
+            var description = Describe(action, info, ext);
+            if (job.Target == IpodFirmware.Stock && info is not null)
+            {
+                // D12: FLAC becomes Apple Lossless. Hi-res is first converted to 16/44.1 exactly as for Rockbox.
+                if (info.BitsPerSample < 16)
+                {
+                    throw new NotSupportedException($"A {info.BitsPerSample}-bit FLAC can't be stored as Apple Lossless without raising its bit depth; it is reported instead.");
+                }
+
+                var flacSource = original;
+                if (action is FlacAction.Convert)
+                {
+                    (flacSource, fromCache) = await ConvertAsync(ffmpeg, original, info, part, action, ct).ConfigureAwait(false);
+                }
+
+                bool alacFromCache;
+                (untaggedReference, alacFromCache) = await AlacAsync(ffmpeg, flacSource, part, action, ct).ConfigureAwait(false);
+                fromCache |= alacFromCache;
+                staged = Path.Combine(work, "out.m4a");
+                File.Copy(untaggedReference, staged);
+                description = action is FlacAction.Convert c
+                    ? $"Apple Lossless {Format(c.TargetBits, c.TargetRateHz)} (converted from FLAC {Format(info.BitsPerSample, info.SampleRateHz)})"
+                    : $"Apple Lossless (from FLAC {Format(info.BitsPerSample, info.SampleRateHz)})";
+            }
+            else if (job.Target == IpodFirmware.Stock && ItdbFileKinds.FromExtension(ContainerCleaner.OutputExtension(ext)) is null)
+            {
+                throw new PipelineException($"{ext.TrimStart('.').ToUpperInvariant()} doesn't play on the iPod's Apple firmware.");
+            }
+            else if (action is FlacAction.Copy)
             {
                 staged = Path.Combine(work, "out" + ContainerCleaner.OutputExtension(ext));
                 if (ContainerCleaner.NeedsRemux(ext))
@@ -113,7 +153,17 @@ public sealed class TrackPipeline(
 
             MoveIntoPlace(staged, job.OutputPath);
             var size = new FileInfo(job.OutputPath).Length;
-            return new ProcessedTrack(job.OutputPath, Describe(action, info, ext), outcome, tags.ContentHash(), size, fromCache, sourceTags);
+            var (lengthMs, bitrate, sampleRate) = TagWriter.ReadAudio(job.OutputPath);
+            var outExt = Path.GetExtension(job.OutputPath);
+            var kind = job.Target == IpodFirmware.Stock && info is not null
+                ? ItdbFileKind.AppleLossless
+                : ItdbFileKinds.FromExtension(outExt, outExt.Equals(".m4a", StringComparison.OrdinalIgnoreCase) ? track.Format.Codec : null);
+            var gapless = kind == ItdbFileKind.Aac ? TagWriter.ParseGaplessInfo(TagWriter.ReadGaplessInfo(original)) : null;
+            return new ProcessedTrack(job.OutputPath, description, outcome, tags.ContentHash(), size, fromCache, sourceTags)
+            {
+                Audio = new AudioFacts(kind, lengthMs, bitrate, sampleRate, gapless),
+                Tags = tags,
+            };
         }
         catch (Exception ex) when (ex is not OperationCanceledException && KeepFailedSource(original, job))
         {
@@ -186,6 +236,36 @@ public sealed class TrackPipeline(
 
         // A cached file is re-checked against this download before it is trusted.
         await VerifyConversionAsync(ffmpeg, original, info, cached, action, ct).ConfigureAwait(false);
+        return (cached, true);
+    }
+
+    /// <summary>Apple Lossless from a FLAC (cached like conversions, and re-verified against its source when reused).</summary>
+    private async Task<(string Path, bool FromCache)> AlacAsync(FfmpegInstall ffmpeg, string flac, MediaPartRef part, FlacAction action, CancellationToken ct)
+    {
+        var key = ConversionCache.AlacKey(part.PartId, part.Key, action);
+        if (!cache.TryGet(key, out var cached))
+        {
+            await _conversions.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                if (!cache.TryGet(key, out cached))
+                {
+                    var temp = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(flac)) is { } dir && dir.StartsWith(paths.Work, StringComparison.OrdinalIgnoreCase)
+                        ? dir
+                        : Directory.CreateDirectory(Path.Combine(paths.Work, Guid.NewGuid().ToString("N"))).FullName, "alac.m4a");
+                    logger.LogInformation("Encoding part {PartId} as Apple Lossless", part.PartId);
+                    await converter.ToAlacAsync(ffmpeg, flac, temp, ct).ConfigureAwait(false);
+                    await verifier.VerifyAlacAsync(ffmpeg, flac, temp, ct).ConfigureAwait(false);
+                    return (cache.Add(key, temp), false);
+                }
+            }
+            finally
+            {
+                _conversions.Release();
+            }
+        }
+
+        await verifier.VerifyAlacAsync(ffmpeg, flac, cached, ct).ConfigureAwait(false);
         return (cached, true);
     }
 

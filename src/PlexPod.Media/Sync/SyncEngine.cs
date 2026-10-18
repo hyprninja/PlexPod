@@ -5,8 +5,11 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
+using PlexPod.Core.ItunesDb;
+using PlexPod.Core.Stats;
 using PlexPod.Core.Media;
 using PlexPod.Core.Models;
+using PlexPod.Device;
 using PlexPod.Core.Sync;
 using PlexPod.Core.Tagging;
 using PlexPod.Device.Sync;
@@ -63,7 +66,9 @@ public sealed class SyncEngine(
         var manifest = Sanitize(loaded ?? DeviceManifest.Empty(identity?.DeviceId ?? string.Empty), notes);
 
         progress?.Report("Listing files on the iPod…");
-        var listing = await Task.Run(() => DeviceFileOps.ListFiles(root, "Music", "Playlists"), ct).ConfigureAwait(false);
+        var stock = request.Firmware == IpodFirmware.Stock;
+        string[] folders = stock ? ["iPod_Control/Music", "Music", "Playlists"] : ["Music", "Playlists"];
+        var listing = await Task.Run(() => DeviceFileOps.ListFiles(root, folders), ct).ConfigureAwait(false);
         manifest = Reconcile(manifest, listing, notes);
         var owned = OwnedPaths(manifest);
         var unowned = listing.Where(f => !owned.Contains(f)).ToList();
@@ -88,7 +93,8 @@ public sealed class SyncEngine(
         progress?.Report("Comparing with Plex…");
 
         var blockers = new List<string>();
-        var targets = BuildTargets(request);
+        var unplayable = new List<string>();
+        var targets = BuildTargets(request, unplayable);
         var targetByKey = targets.ToDictionary(t => t.Track.RatingKey, StringComparer.Ordinal);
 
         // Adopted files don't record the part key; fill it in where the part id still matches Plex.
@@ -107,6 +113,16 @@ public sealed class SyncEngine(
 
         var nowOwned = OwnedPaths(manifest);
         var userFiles = listing.Where(f => !nowOwned.Contains(f)).ToList();
+
+        // Tracks written for the other firmware (a Rockbox-era /Music library on a stock iPod, D13, or the
+        // reverse) are never moved or re-tagged into this one: they are removed, last, like any unselected track.
+        var otherFirmware = manifest.Tracks.Where(t => IpodPath.IsMusicFile(t.DevicePath) != stock).ToList();
+        if (otherFirmware.Count > 0)
+        {
+            notes.Add($"{otherFirmware.Count} track(s) PlexPod wrote for {(stock ? "Rockbox" : "the Apple firmware")} will be removed; this iPod now runs {(stock ? "Apple's firmware" : "Rockbox")}.");
+        }
+
+        var forPlanning = manifest with { Tracks = [.. manifest.Tracks.Except(otherFirmware)] };
 
         var playlists = new List<SyncPlaylistTarget>();
         foreach (var key in request.Selection.PlaylistKeys)
@@ -127,26 +143,59 @@ public sealed class SyncEngine(
             blockers.Add("Some selected playlists are still loading from Plex.");
         }
 
-        var plan = SyncPlanner.Plan(manifest, targets, playlists, userFiles, t => ArtistOf(request.Snapshot, t));
-        var fit = FitCheck.Evaluate(plan, FreeSpace(root));
+        // On the stock firmware playlists live in the database, not in files: any playlist files PlexPod
+        // wrote before (Rockbox-era) are removed (D13).
+        var plan = SyncPlanner.Plan(forPlanning, targets, stock ? [] : playlists, userFiles, t => ArtistOf(request.Snapshot, t));
+        if (otherFirmware.Count > 0)
+        {
+            plan = plan with { TrackRemovals = [.. plan.TrackRemovals, .. otherFirmware] };
+        }
+
+        var fit = FitCheck.Evaluate(plan, FreeSpace(root), stock ? StockLibrary.DatabaseReserve(targets.Count) : 0);
         if (fit.Outcome == FitOutcome.TooBig)
         {
             blockers.Add($"The selection doesn't fit: {Mb(fit.OverBy)} MB over, even after removals.");
         }
 
         StatsPreview? statsPreview = null;
-        if (request.Stats is { } statsOptions)
+        if (request.Stats is { } statsOptions && !stock)
         {
             progress?.Report("Reading plays on the iPod…");
             statsPreview = await stats.PreviewAsync(root, manifest, statsOptions, PlexHasRating(request.Snapshot), ct).ConfigureAwait(false);
         }
 
-        return new SyncPreview(request, identity, manifest, source, adoption, plan, fit, blockers)
+        if (unplayable.Count > 0)
+        {
+            notes.Add($"{unplayable.Count} selected track(s) are in formats Apple's firmware can't play and were left out ({string.Join(", ", unplayable.Take(3))}).");
+        }
+
+        var preview = new SyncPreview(request, identity, manifest, source, adoption, plan, fit, blockers)
         {
             Notes = notes,
             DeviceFingerprint = Fingerprint(root),
             NotOurs = [.. stillNotOurs, .. adoption.NotOurs],
             Stats = statsPreview,
+            UnplayableOnStock = unplayable,
+        };
+
+        if (!stock)
+        {
+            return preview;
+        }
+
+        progress?.Report("Reading the iPod's library…");
+        var signature = StockLibrary.Signature(targets, playlists, MasterName(request));
+        var stockStats = await Task.Run(() => CountStockPlays(root, manifest, request.Stats is not null, notes), ct).ConfigureAwait(false);
+        var pending = request.Stats is null ? StatsState.Empty : await store.LoadStatsAsync(ct).ConfigureAwait(false);
+        return preview with
+        {
+            StockPlaylists = playlists,
+            StockSignature = signature,
+            StockStats = (stockStats.Plays + pending.PendingPlays.Values.Sum(), stockStats.Ratings + pending.PendingRatings.Count),
+            StockDatabaseNeedsWrite = !plan.IsEmpty
+                || manifest.StockDatabaseSignature != signature
+                || !File.Exists(DevicePaths.ToLocal(root, DevicePaths.ItunesDbPath))
+                || File.Exists(DevicePaths.ToLocal(root, DevicePaths.PlayCountsPath)),
         };
     }
 
@@ -165,9 +214,24 @@ public sealed class SyncEngine(
             }
 
             await PreflightAsync(run).ConfigureAwait(false);
-            await StatsAsync(run).ConfigureAwait(false);
+            if (preview.IsStock)
+            {
+                await StockStatsAsync(run).ConfigureAwait(false);
+            }
+            else
+            {
+                await StatsAsync(run).ConfigureAwait(false);
+            }
+
             if (preview.UsesMakeRoom)
             {
+                if (preview.IsStock)
+                {
+                    // The firmware must never list a file that's gone: first a database without the tracks
+                    // about to be removed (playlists briefly absent, D5), then the removals.
+                    await WriteStockDatabaseAsync(run, interim: true).ConfigureAwait(false);
+                }
+
                 await MakeRoomAsync(run).ConfigureAwait(false);
             }
 
@@ -180,10 +244,20 @@ public sealed class SyncEngine(
                 return await CommitAsync(run, completed: false).ConfigureAwait(false);
             }
 
-            await CoversAsync(run).ConfigureAwait(false);
-            await PlaylistsAsync(run).ConfigureAwait(false);
+            if (preview.IsStock)
+            {
+                if (preview.StockDatabaseNeedsWrite || run.Added + run.Replaced + run.Retagged + run.Moved > 0)
+                {
+                    await WriteStockDatabaseAsync(run, interim: false).ConfigureAwait(false);
+                }
+            }
+            else
+            {
+                await CoversAsync(run).ConfigureAwait(false);
+                await PlaylistsAsync(run).ConfigureAwait(false);
+            }
 
-            if (!VerifyPlaylists(run))
+            if (!(preview.IsStock ? VerifyStockDatabase(run) : VerifyPlaylists(run)))
             {
                 await run.SaveAsync().ConfigureAwait(false);
                 return await CommitAsync(run, completed: false).ConfigureAwait(false);
@@ -250,6 +324,7 @@ public sealed class SyncEngine(
         }
 
         run.State.DeviceId = identity.DeviceId;
+        run.State.Firmware = run.Preview.IsStock ? DeviceManifest.FirmwareStock : DeviceManifest.FirmwareRockbox;
         run.Warnings.AddRange(run.Preview.Notes);
         run.Started = true;
         if (run.Store.MigrateLegacyFolder())
@@ -298,6 +373,301 @@ public sealed class SyncEngine(
     /// <summary>D10 "Only fill gaps": whether Plex already has a rating for a track (from the loaded track list).</summary>
     public static Func<string, bool> PlexHasRating(LibrarySnapshot snapshot) =>
         key => snapshot.FindTrack(key)?.UserRating is not null;
+
+    // ---------------------------------------------------------------- stock firmware (M6)
+
+    private static string MasterName(SyncRequest request) =>
+        string.IsNullOrWhiteSpace(request.VolumeLabel) ? "iPod" : request.VolumeLabel.Trim();
+
+    /// <summary>Plex's 0–10 rating as the firmware's stars × 20.</summary>
+    private static byte PlexRating(TrackItem track) =>
+        track.UserRating is { } r ? (byte)Math.Clamp(Math.Round(r) * 10, 0, 100) : (byte)0;
+
+    private static ItdbReadResult? TryReadDatabase(string root, List<string>? warnings = null)
+    {
+        var local = DevicePaths.ToLocal(root, DevicePaths.ItunesDbPath);
+        try
+        {
+            return File.Exists(local) ? ItunesDbReader.Read(File.ReadAllBytes(local)) : null;
+        }
+        catch (Exception ex) when (ex is ItunesDbFormatException or IOException or UnauthorizedAccessException)
+        {
+            warnings?.Add($"The iPod's existing iTunesDB couldn't be read ({ex.Message}); it will be replaced.");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Lines the firmware's Play Counts up with the database it was recorded against: entry i belongs
+    /// to the database's track i. Only tracks PlexPod owns (by database id) are returned.
+    /// </summary>
+    private static List<(ManifestTrack Owned, ItdbTrack OnIpod, PlayCountEntry Entry)> MatchPlayCounts(string root, IEnumerable<ManifestTrack> owned, List<string> warnings)
+    {
+        var matches = new List<(ManifestTrack, ItdbTrack, PlayCountEntry)>();
+        var local = DevicePaths.ToLocal(root, DevicePaths.PlayCountsPath);
+        if (!File.Exists(local))
+        {
+            return matches;
+        }
+
+        IReadOnlyList<PlayCountEntry> entries;
+        try
+        {
+            entries = PlayCountsReader.Read(File.ReadAllBytes(local));
+        }
+        catch (ItunesDbFormatException ex)
+        {
+            warnings.Add($"The iPod's Play Counts file couldn't be read ({ex.Message}); its plays are lost.");
+            return matches;
+        }
+
+        var db = TryReadDatabase(root, warnings);
+        if (db is null)
+        {
+            warnings.Add("The iPod has plays recorded but no database to match them to; they can't be sent.");
+            return matches;
+        }
+
+        var byDbid = owned.Where(t => t.Stock is not null).GroupBy(t => t.Stock!.Dbid).ToDictionary(g => g.Key, g => g.First());
+        for (var i = 0; i < Math.Min(entries.Count, db.Tracks.Count); i++)
+        {
+            var onIpod = db.Tracks[i].Track;
+            var entry = entries[i];
+            var ratingChanged = entry.Rating is { } r && r != onIpod.Rating;
+            if ((entry.Plays > 0 || entry.Skips > 0 || ratingChanged) && byDbid.TryGetValue(onIpod.Dbid, out var mine))
+            {
+                matches.Add((mine, onIpod, entry));
+            }
+        }
+
+        return matches;
+    }
+
+    /// <summary>For the plan dialog: plays and rating changes in Play Counts (read-only).</summary>
+    private static (int Plays, int Ratings) CountStockPlays(string root, DeviceManifest manifest, bool statsOn, List<string> notes)
+    {
+        if (!statsOn)
+        {
+            return (0, 0);
+        }
+
+        var matches = MatchPlayCounts(root, manifest.Tracks, notes);
+        return ((int)matches.Sum(m => m.Entry.Plays), matches.Count(m => m.Entry.Rating is { } r && r != m.OnIpod.Rating));
+    }
+
+    /// <summary>
+    /// Step 0 on the stock firmware (M6 plan §4.3): fold Play Counts into the manifest (so every rebuilt
+    /// database keeps the iPod's counts and ratings), keep the plays and rating changes for Plex as
+    /// pending, delete Play Counts as iTunes does (D14), then send everything pending to Plex. Plex
+    /// being down never stops the sync; what isn't accepted stays pending for next time.
+    /// </summary>
+    private async Task StockStatsAsync(Run run)
+    {
+        var request = run.Preview.Request;
+        run.Report("Reading plays on the iPod", 0, 0, string.Empty);
+        var state = await run.Store.LoadStatsAsync(CancellationToken.None).ConfigureAwait(false);
+        var pendingPlays = new Dictionary<string, int>(state.PendingPlays, StringComparer.Ordinal);
+        var pendingRatings = new Dictionary<string, int>(state.PendingRatings, StringComparer.Ordinal);
+        var warnings = new List<string>();
+        var countsFile = DevicePaths.ToLocal(run.Root, DevicePaths.PlayCountsPath);
+        var hadCounts = File.Exists(countsFile);
+        foreach (var (owned, onIpod, entry) in MatchPlayCounts(run.Root, run.State.Tracks.Values.ToList(), warnings))
+        {
+            var current = run.State.Tracks.GetValueOrDefault(owned.DevicePath) ?? owned;
+            var record = current.Stock!;
+            run.State.Tracks[current.DevicePath] = current with
+            {
+                Stock = record with
+                {
+                    PlayCount = record.PlayCount + entry.Plays,
+                    LastPlayed = Later(record.LastPlayed, entry.LastPlayed),
+                    SkipCount = record.SkipCount + entry.Skips,
+                    LastSkipped = Later(record.LastSkipped, entry.LastSkipped),
+                    Rating = entry.Rating ?? record.Rating,
+                },
+            };
+
+            if (request.Stats is null)
+            {
+                continue; // stats return is off: the iPod keeps its counts, nothing goes to Plex
+            }
+
+            if (entry.Plays > 0)
+            {
+                pendingPlays[current.RatingKey] = pendingPlays.GetValueOrDefault(current.RatingKey) + (int)Math.Min(entry.Plays, 1000);
+            }
+
+            if (entry.Rating is { } stars && stars != onIpod.Rating)
+            {
+                pendingRatings[current.RatingKey] = stars == 0 ? -1 : stars / 10;
+            }
+        }
+
+        run.Warnings.AddRange(warnings);
+        if (hadCounts)
+        {
+            // Counts are in the manifest and the plays are pending: only now can the firmware's file go.
+            await run.SaveAsync().ConfigureAwait(false);
+            await run.Store.SaveStatsAsync(state with { PendingPlays = pendingPlays, PendingRatings = pendingRatings }, CancellationToken.None).ConfigureAwait(false);
+            DeviceFileOps.Delete(run.Root, DevicePaths.PlayCountsPath);
+        }
+
+        if (request.Stats is not { } options || pendingPlays.Count + pendingRatings.Count == 0)
+        {
+            return;
+        }
+
+        run.Report("Sending plays to Plex", 0, 0, string.Empty);
+        int plays = 0, ratings = 0;
+        string? error = null;
+        var hasRating = PlexHasRating(request.Snapshot);
+        try
+        {
+            foreach (var key in pendingPlays.Keys.ToList())
+            {
+                while (pendingPlays.TryGetValue(key, out var left) && left > 0)
+                {
+                    run.Stop.ThrowIfCancellationRequested();
+                    await request.Client.ScrobbleAsync(key, run.Stop).ConfigureAwait(false);
+                    plays++;
+                    if (left == 1)
+                    {
+                        pendingPlays.Remove(key);
+                    }
+                    else
+                    {
+                        pendingPlays[key] = left - 1;
+                    }
+                }
+            }
+
+            foreach (var (key, value) in pendingRatings.ToList())
+            {
+                run.Stop.ThrowIfCancellationRequested();
+                if (!(options.Ratings == RatingMode.FillGapsOnly && hasRating(key)))
+                {
+                    await request.Client.RateAsync(key, value, run.Stop).ConfigureAwait(false);
+                    ratings++;
+                }
+
+                pendingRatings.Remove(key);
+            }
+        }
+        catch (Exception ex) when (ex is HttpRequestException or Plex.Http.PlexProtocolException
+                                   || (ex is OperationCanceledException && !run.Stop.IsCancellationRequested))
+        {
+            logger.LogWarning(ex, "Plex stopped accepting plays after {Plays} play(s)", plays);
+            error = "Couldn't reach Plex.";
+        }
+        finally
+        {
+            await run.Store.SaveStatsAsync(state with { PendingPlays = pendingPlays, PendingRatings = pendingRatings }, CancellationToken.None).ConfigureAwait(false);
+        }
+
+        var waitingPlays = pendingPlays.Values.Sum();
+        var lines = new List<string>();
+        if (plays + ratings > 0)
+        {
+            lines.Add($"Sent {StatsService.Describe(plays, ratings)} from the iPod to Plex.");
+        }
+
+        if (error is not null)
+        {
+            lines.Add($"{error} {StatsService.Describe(waitingPlays, pendingRatings.Count)} will be sent next time.");
+        }
+
+        run.Stats = new StatsResult(plays, ratings, waitingPlays, pendingRatings.Count, 0, 0, error, lines);
+    }
+
+    private static DateTime? Later(DateTime? a, DateTime? b) => a is null ? b : b is null ? a : a > b ? a : b;
+
+    /// <summary>
+    /// Builds the whole iTunesDB from the manifest, checks it parses back, and swaps it in through
+    /// DeviceFileOps (temp file, read-back, rename): the firmware never sees a half-written database.
+    /// The tracks this sync removes are left out, because they are deleted after the swap. The interim
+    /// database (make-room mode, before the removals) has no playlists: they are briefly absent (D5).
+    /// </summary>
+    private async Task WriteStockDatabaseAsync(Run run, bool interim)
+    {
+        run.Report("Writing the iPod's library", 0, 1, string.Empty);
+        var failures = new List<string>();
+        var warnings = new List<string>();
+        var previous = TryReadDatabase(run.Root, warnings);
+        var removing = run.Preview.Plan.TrackRemovals.Select(t => t.DevicePath).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var library = StockLibrary.Build(
+            run.State.Tracks.Values.Where(t => !removing.Contains(t.DevicePath)),
+            interim ? [] : run.Preview.StockPlaylists,
+            run.State.DeviceId,
+            MasterName(run.Preview.Request),
+            t => StockLibrary.FromFile(DevicePaths.ToLocal(run.Root, t.DevicePath), t),
+            previous,
+            failures,
+            warnings);
+        var bytes = ItunesDbWriter.Write(library);
+        ItunesDbReader.Read(bytes); // never put a database on the iPod that doesn't read back
+
+        var temp = Path.Combine(paths.CacheRoot, "sync-staging", Guid.NewGuid().ToString("N") + ".itdb");
+        Directory.CreateDirectory(Path.GetDirectoryName(temp)!);
+        await File.WriteAllBytesAsync(temp, bytes).ConfigureAwait(false);
+        try
+        {
+            await files.CopyVerifiedAsync(temp, run.Root, DevicePaths.ItunesDbPath, CancellationToken.None).ConfigureAwait(false);
+        }
+        finally
+        {
+            TryDelete(temp);
+        }
+
+        run.Warnings.AddRange(warnings);
+        if (!interim)
+        {
+            run.Failures.AddRange(failures);
+            run.StockLibrary = (library.Tracks.Count, library.Playlists.Count);
+
+            // Remembered only when complete, so a partial database is rebuilt next time.
+            run.State.StockSignature = run.Failures.Count == 0 ? run.Preview.StockSignature : null;
+        }
+
+        await run.SaveAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>P6 for the stock firmware: the database on the iPod reads back, and every file it names is there.</summary>
+    private bool VerifyStockDatabase(Run run)
+    {
+        run.Report("Checking the iPod's library", 0, 1, string.Empty);
+        var problems = new List<string>();
+        var local = DevicePaths.ToLocal(run.Root, DevicePaths.ItunesDbPath);
+        if (!File.Exists(local))
+        {
+            return run.State.Tracks.Values.All(t => !IpodPath.IsMusicFile(t.DevicePath));
+        }
+
+        try
+        {
+            var db = ItunesDbReader.Read(File.ReadAllBytes(local));
+            foreach (var track in db.Tracks)
+            {
+                var devicePath = IpodPath.FromColon(track.Track.IpodPath);
+                if (!DevicePaths.IsWellFormed(devicePath) || !File.Exists(DevicePaths.ToLocal(run.Root, devicePath)))
+                {
+                    problems.Add($"{track.Track.Title}: {devicePath} is missing");
+                }
+            }
+        }
+        catch (Exception ex) when (ex is ItunesDbFormatException or IOException or ArgumentException)
+        {
+            problems.Add($"The iTunesDB doesn't read back: {ex.Message}");
+        }
+
+        if (problems.Count == 0)
+        {
+            return true;
+        }
+
+        run.Failures.Add($"Library check failed ({problems.Count} problem(s)); nothing was removed:");
+        run.Failures.AddRange(problems.Take(20).Select(p => "  " + p));
+        return false;
+    }
 
     /// <summary>D5: free space first without ever leaving a broken playlist line (M3 plan §5a).</summary>
     private async Task MakeRoomAsync(Run run)
@@ -495,8 +865,9 @@ public sealed class SyncEngine(
         var artist = await run.ArtistForGenreAsync(album).ConfigureAwait(false);
         var mbid = request.Policy.MusicBrainzTrackId ? await run.MbidAsync(track.RatingKey).ConfigureAwait(false) : null;
         var images = await run.ArtAsync(album).ConfigureAwait(false);
-        var output = Path.Combine(staging, Guid.NewGuid().ToString("N") + TrackPipeline.SourceExtension(track.Parts[0]));
-        var job = new TrackJob(track, album, artist, request.Snapshot.TracksByAlbum(track.AlbumKey).ToList(), mbid, images, request.Policy, output);
+        var output = Path.Combine(staging, Guid.NewGuid().ToString("N") + Path.GetExtension(op.DevicePath));
+        var job = new TrackJob(track, album, artist, request.Snapshot.TracksByAlbum(track.AlbumKey).ToList(), mbid, images, request.Policy, output,
+            Target: request.Firmware);
         return await pipeline.ProcessAsync(request.Client, request.Ffmpeg, job, ct).ConfigureAwait(false);
     }
 
@@ -528,6 +899,9 @@ public sealed class SyncEngine(
             SourceComment = processed.SourceTags.Comment,
             MusicBrainzTrackId = run.Mbids.GetValueOrDefault(op.Target.Track.RatingKey),
             Action = processed.Action,
+            Stock = run.Preview.IsStock
+                ? StockLibrary.Record(processed, op.DevicePath, op.Target.Track.RatingKey, op.Existing?.Stock, PlexRating(op.Target.Track))
+                : null,
         };
         run.BytesWritten += copy.SizeBytes;
         run.AlbumsTouched.Add(op.Target.Track.AlbumKey);
@@ -660,7 +1034,6 @@ public sealed class SyncEngine(
         await run.SaveAsync().ConfigureAwait(false);
     }
 
-    /// <summary>P6: every PlexPod playlist re-read from the iPod, every line resolved with exact case.</summary>
     /// <summary>
     /// P6 for the playlists this sync keeps. Stale ones about to be removed aren't checked: their lines
     /// may already point at files deleted by hand or moved, and failing on them would block their own
@@ -772,8 +1145,9 @@ public sealed class SyncEngine(
 
     // ---------------------------------------------------------------- helpers
 
-    internal static List<SyncTrackTarget> BuildTargets(SyncRequest request)
+    internal static List<SyncTrackTarget> BuildTargets(SyncRequest request, List<string>? unplayable = null)
     {
+        var stock = request.Firmware == IpodFirmware.Stock;
         var snapshot = request.Snapshot;
         var fromPlaylists = request.PlaylistContents.Values
             .SelectMany(c => c.Entries)
@@ -792,14 +1166,35 @@ public sealed class SyncEngine(
             }
 
             var album = snapshot.FindAlbum(track.AlbumKey);
-            var multiDisc = snapshot.TracksByAlbum(track.AlbumKey).Select(t => t.DiscIndex ?? 1).Distinct().Count() > 1;
-            var path = DevicePathBuilder.Build(
-                new PathFields(album?.ArtistTitle ?? ArtistOf(snapshot, track), album?.Year, album?.Title, track.DiscIndex, track.Index, track.Title),
-                TrackPipeline.DeviceExtension(track.Parts[0]),
-                multiDisc);
-            var estimate = request.KnownSizes.TryGetValue(key, out var known)
-                ? known
-                : SizeEstimator.EstimateBytes(track, request.FormatOverrides.GetValueOrDefault(key) ?? track.Format).Bytes;
+            string path;
+            long estimate;
+            if (stock)
+            {
+                // Apple's own layout: iPod_Control/Music/Fnn/ABCD.ext; FLAC becomes Apple Lossless (D12).
+                var source = TrackPipeline.SourceExtension(track.Parts[0]);
+                var isFlac = source == ".flac";
+                var ext = isFlac ? ".m4a" : Ffmpeg.ContainerCleaner.OutputExtension(source);
+                if (!isFlac && ItdbFileKinds.FromExtension(ext) is null)
+                {
+                    unplayable?.Add(track.Title);
+                    continue;
+                }
+
+                path = IpodPath.ForTrack(track.RatingKey, ext);
+                var flac = SizeEstimator.EstimateBytes(track, request.FormatOverrides.GetValueOrDefault(key) ?? track.Format).Bytes;
+                estimate = isFlac ? flac + (flac / 10) : flac; // Apple Lossless runs a few % larger than FLAC
+            }
+            else
+            {
+                var multiDisc = snapshot.TracksByAlbum(track.AlbumKey).Select(t => t.DiscIndex ?? 1).Distinct().Count() > 1;
+                path = DevicePathBuilder.Build(
+                    new PathFields(album?.ArtistTitle ?? ArtistOf(snapshot, track), album?.Year, album?.Title, track.DiscIndex, track.Index, track.Title),
+                    TrackPipeline.DeviceExtension(track.Parts[0]),
+                    multiDisc);
+                estimate = request.KnownSizes.TryGetValue(key, out var known)
+                    ? known
+                    : SizeEstimator.EstimateBytes(track, request.FormatOverrides.GetValueOrDefault(key) ?? track.Format).Bytes;
+            }
             targets.Add(new SyncTrackTarget(track, path, estimate + TagAllowanceBytes, SyncTrackTarget.Stamp(track.UpdatedAt, album?.UpdatedAt, fingerprint)));
         }
 
@@ -947,6 +1342,9 @@ public sealed class SyncEngine(
         /// <summary>Set once preflight passed; from then on, any failure saves the manifest before reporting.</summary>
         public bool Started { get; set; }
 
+        /// <summary>Stock firmware: tracks and playlists in the database written this sync.</summary>
+        public (int Tracks, int Playlists)? StockLibrary { get; set; }
+
         public StatsResult? Stats { get; set; }
 
         public bool Stopped { get; set; }
@@ -1092,7 +1490,9 @@ public sealed class SyncEngine(
             b.AppendLine(CultureInfo.InvariantCulture, $"PlexPod sync, {DateTimeOffset.Now:yyyy-MM-dd HH:mm zzz} ({_clock.Elapsed:hh\\:mm\\:ss})");
             b.AppendLine(completed ? "Result: completed" : Stopped ? "Result: stopped (safe to sync again)" : "Result: finished with problems");
             b.AppendLine(CultureInfo.InvariantCulture, $"Added {Added}, replaced {Replaced}, re-tagged {Retagged} ({TagsAlreadyCurrent} already current), moved {Moved}, removed {Removed}.");
-            b.AppendLine(CultureInfo.InvariantCulture, $"Playlists written {PlaylistsWritten}, removed {PlaylistsRemoved}. {BytesWritten / 1048576.0:0.0} MB written, every file read back and verified.");
+            b.AppendLine(StockLibrary is { } library
+                ? string.Create(CultureInfo.InvariantCulture, $"iPod library rebuilt: {library.Tracks} tracks, {library.Playlists} playlists. {BytesWritten / 1048576.0:0.0} MB written, every file read back and verified.")
+                : string.Create(CultureInfo.InvariantCulture, $"Playlists written {PlaylistsWritten}, removed {PlaylistsRemoved}. {BytesWritten / 1048576.0:0.0} MB written, every file read back and verified."));
             if (Stats is { Lines.Count: > 0 } sent)
             {
                 b.AppendLine().AppendLine("Plays and ratings:");
@@ -1114,7 +1514,9 @@ public sealed class SyncEngine(
                 Warnings.ForEach(w => b.AppendLine("  " + w));
             }
 
-            b.AppendLine().AppendLine("Run Database → Update Now on the iPod (or keep Auto Update on) so the new tracks appear in its menus.");
+            b.AppendLine().AppendLine(Preview.IsStock
+                ? "Eject the iPod before unplugging it; the new library shows straight away."
+                : "Run Database → Update Now on the iPod (or keep Auto Update on) so the new tracks appear in its menus.");
             return b.ToString();
         }
     }
@@ -1123,6 +1525,10 @@ public sealed class SyncEngine(
     private sealed class MutableManifest(DeviceManifest source)
     {
         public string DeviceId { get; set; } = source.DeviceId;
+
+        public string Firmware { get; set; } = source.Firmware;
+
+        public string? StockSignature { get; set; } = source.StockDatabaseSignature;
 
         public Dictionary<string, ManifestTrack> Tracks { get; } = source.Tracks
             .GroupBy(t => t.DevicePath, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
@@ -1138,6 +1544,8 @@ public sealed class SyncEngine(
         public DeviceManifest ToManifest() => new()
         {
             DeviceId = DeviceId,
+            Firmware = Firmware,
+            StockDatabaseSignature = StockSignature,
             Tracks = [.. Tracks.Values.OrderBy(t => t.DevicePath, StringComparer.Ordinal)],
             Playlists = [.. Playlists.Values.OrderBy(p => p.DevicePath, StringComparer.Ordinal)],
             Extras = [.. Extras.Values.OrderBy(e => e.DevicePath, StringComparer.Ordinal)],

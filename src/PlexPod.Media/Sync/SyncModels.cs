@@ -2,6 +2,7 @@ using PlexPod.Core.Models;
 using PlexPod.Core.Selection;
 using PlexPod.Core.Sync;
 using PlexPod.Core.Tagging;
+using PlexPod.Device;
 using PlexPod.Device.Sync;
 using PlexPod.Media.Ffmpeg;
 using PlexPod.Media.Stats;
@@ -23,7 +24,8 @@ public sealed record SyncRequest(
     IReadOnlyDictionary<string, long> KnownSizes,
     TagPolicy Policy,
     SelectionProfile Profile,
-    StatsOptions? Stats = null);
+    StatsOptions? Stats = null,
+    IpodFirmware Firmware = IpodFirmware.Rockbox);
 
 /// <summary>The read-only look before a sync: what will happen, whether it fits, and anything blocking it.</summary>
 public sealed record SyncPreview(
@@ -48,15 +50,36 @@ public sealed record SyncPreview(
     /// <summary>Plays and ratings waiting to go to Plex (M4); null when stats return is off.</summary>
     public StatsPreview? Stats { get; init; }
 
+    public bool IsStock => Request.Firmware == IpodFirmware.Stock;
+
+    /// <summary>Stock firmware: the iTunesDB is missing, out of date, or has plays to fold in, so it will be rebuilt.</summary>
+    public bool StockDatabaseNeedsWrite { get; init; }
+
+    /// <summary>Stock firmware: what the rebuilt database is built from (saved in the manifest once it's on the iPod).</summary>
+    public string? StockSignature { get; init; }
+
+    /// <summary>Stock firmware: the selected playlists, written into the database rather than as files.</summary>
+    public IReadOnlyList<SyncPlaylistTarget> StockPlaylists { get; init; } = [];
+
+    /// <summary>Stock firmware: plays and rating changes waiting in Play Counts or from an earlier sync.</summary>
+    public (int Plays, int Ratings) StockStats { get; init; }
+
+    /// <summary>Stock firmware: selected tracks in formats it can't play (OGG, Opus, …), left out.</summary>
+    public IReadOnlyList<string> UnplayableOnStock { get; init; } = [];
+
+    /// <summary>Anything to do at all: file changes, a database rebuild, or plays to send.</summary>
+    public bool HasWork => !Plan.IsEmpty || StockDatabaseNeedsWrite
+        || Stats is { Plan.IsEmpty: false } || StockStats.Plays + StockStats.Ratings > 0;
+
     public bool CanStart => Blockers.Count == 0 && Fit.Outcome != FitOutcome.TooBig;
 
     public bool UsesMakeRoom => Fit.Outcome == FitOutcome.FitsAfterRemovals;
 
     /// <summary>Playlists briefly absent in make-room mode (D5).</summary>
     public IReadOnlyList<string> BrieflyAbsentPlaylists =>
-        UsesMakeRoom
-            ? [.. Plan.PlaylistOps.Where(p => p.NeedsWrite && p.Existing is not null).Select(p => p.Target.Playlist.Title)]
-            : [];
+        !UsesMakeRoom ? []
+        : IsStock ? [.. StockPlaylists.Select(p => p.Playlist.Title)]
+        : [.. Plan.PlaylistOps.Where(p => p.NeedsWrite && p.Existing is not null).Select(p => p.Target.Playlist.Title)];
 
     public IReadOnlyList<PlaylistEntry> UnavailableEntries => [.. Plan.PlaylistOps.SelectMany(p => p.SkippedEntries)];
 }

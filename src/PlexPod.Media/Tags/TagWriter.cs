@@ -58,6 +58,55 @@ public sealed class TagWriter
         }
     }
 
+    /// <summary>Is this MP4 file's audio Apple Lossless (rather than AAC)?</summary>
+    public static bool IsAppleLossless(string path)
+    {
+        try
+        {
+            using var file = TagFile.Create(path);
+            return file.Properties.Codecs.Any(c => c?.Description?.Contains("alac", StringComparison.OrdinalIgnoreCase) == true
+                || c?.Description?.Contains("Apple Lossless", StringComparison.OrdinalIgnoreCase) == true);
+        }
+        catch (Exception ex) when (ex is UnsupportedFormatException or CorruptFileException or IOException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Length (ms), bitrate (kbit/s) and sample rate (Hz) as TagLib reads them; zeros when it can't.</summary>
+    public static (uint LengthMs, uint Bitrate, uint SampleRate) ReadAudio(string path)
+    {
+        try
+        {
+            using var file = TagFile.Create(path);
+            var p = file.Properties;
+            return ((uint)Math.Max(0, p.Duration.TotalMilliseconds), (uint)Math.Max(0, p.AudioBitrate), (uint)Math.Max(0, p.AudioSampleRate));
+        }
+        catch (Exception ex) when (ex is UnsupportedFormatException or CorruptFileException or IOException)
+        {
+            return (0, 0, 0);
+        }
+    }
+
+    /// <summary>
+    /// Parses an <c>iTunSMPB</c> value (" 00000000 00000840 000001C0 0000000000003A00": encoder delay,
+    /// padding, sample count in hex) for the stock firmware's gapless fields.
+    /// </summary>
+    public static (uint Pregap, uint Postgap, ulong SampleCount)? ParseGaplessInfo(string? value)
+    {
+        var parts = value?.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts is not { Length: >= 4 }
+            || !uint.TryParse(parts[1], System.Globalization.NumberStyles.HexNumber, null, out var pre)
+            || !uint.TryParse(parts[2], System.Globalization.NumberStyles.HexNumber, null, out var post)
+            || !ulong.TryParse(parts[3], System.Globalization.NumberStyles.HexNumber, null, out var samples)
+            || samples == 0)
+        {
+            return null;
+        }
+
+        return (pre, post, samples);
+    }
+
     /// <summary>The MP4 gapless atom (<c>iTunSMPB</c>), if the file has one.</summary>
     public static string? ReadGaplessInfo(string path)
     {

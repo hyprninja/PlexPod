@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.Logging.Abstractions;
+using PlexPod.Core.ItunesDb;
 using PlexPod.Core.Models;
 using PlexPod.Core.Selection;
 using PlexPod.Core.Stats;
@@ -89,11 +90,11 @@ public sealed class SyncEngineTests : IDisposable
         };
     }
 
-    private async Task<SyncRequest> RequestAsync(SelectionProfile profile, TagPolicy? policy = null, StatsOptions? stats = null)
+    private async Task<SyncRequest> RequestAsync(SelectionProfile profile, TagPolicy? policy = null, StatsOptions? stats = null, PlexPod.Device.IpodFirmware firmware = PlexPod.Device.IpodFirmware.Rockbox)
     {
         var resolved = SelectionResolver.Resolve(_snapshot, profile, _contents);
         return new SyncRequest(_ipod, "IPOD", "ipodvideo", _client, await TestFfmpeg.InstallAsync(), _snapshot, resolved, _contents,
-            new Dictionary<string, AudioFormat>(), new Dictionary<string, long>(), policy ?? TagPolicy.Default, profile, stats);
+            new Dictionary<string, AudioFormat>(), new Dictionary<string, long>(), policy ?? TagPolicy.Default, profile, stats, firmware);
     }
 
     private static SelectionProfile Select(bool albumA = true, bool albumB = false, bool playlist = false) =>
@@ -102,12 +103,258 @@ public sealed class SyncEngineTests : IDisposable
             [],
             [.. albumA ? [new ItemRef("alA", "g", "Takk...")] : Array.Empty<ItemRef>(), .. albumB ? [new ItemRef("alB", "g", "Blue")] : Array.Empty<ItemRef>()]);
 
-    private async Task<SyncResult> SyncAsync(SelectionProfile profile, long free = Plenty, TagPolicy? policy = null, CancellationToken stop = default, StatsOptions? stats = null)
+    private async Task<SyncResult> SyncAsync(SelectionProfile profile, long free = Plenty, TagPolicy? policy = null, CancellationToken stop = default, StatsOptions? stats = null,
+        PlexPod.Device.IpodFirmware firmware = PlexPod.Device.IpodFirmware.Rockbox)
     {
         var engine = Engine(free);
-        var preview = await engine.PreviewAsync(await RequestAsync(profile, policy, stats), CancellationToken.None);
+        var preview = await engine.PreviewAsync(await RequestAsync(profile, policy, stats, firmware), CancellationToken.None);
         return await engine.ExecuteAsync(preview, null, stop);
     }
+
+    // ---------------------------------------------------------------- M6: stock firmware
+
+    private const PlexPod.Device.IpodFirmware Stock = PlexPod.Device.IpodFirmware.Stock;
+
+    private Task<SyncResult> StockSyncAsync(SelectionProfile profile, long free = Plenty, StatsOptions? stats = null) =>
+        SyncAsync(profile, free, stats: stats, firmware: Stock);
+
+    private ItdbReadResult Database() => ItunesDbReader.Read(File.ReadAllBytes(Local(PlexPod.Device.Sync.DevicePaths.ItunesDbPath)));
+
+    private void MakeStock()
+    {
+        Directory.Delete(Path.Combine(_ipod, ".rockbox"), recursive: true);
+        Directory.CreateDirectory(Path.Combine(_ipod, "iPod_Control", "iTunes"));
+        Directory.CreateDirectory(Path.Combine(_ipod, "iPod_Control", "Device"));
+        Directory.CreateDirectory(Path.Combine(_ipod, "iPod_Control", "Music"));
+    }
+
+    private void AssertStockLibraryIsSound()
+    {
+        var db = Database();
+        foreach (var track in db.Tracks)
+        {
+            Assert.True(File.Exists(Local(IpodPath.FromColon(track.Track.IpodPath))), $"{track.Track.Title} points at a missing file");
+        }
+
+        Assert.True(db.Playlists[0].IsMaster);
+        Assert.Equal(db.Tracks.Count, db.Playlists[0].TrackIds.Count);
+    }
+
+    [FfmpegFact]
+    public async Task Stock_FirstSync_WritesAppleLosslessAndTheDatabase()
+    {
+        MakeStock();
+        var (a1, _, b1) = await LibraryAsync();
+
+        var result = await StockSyncAsync(Select(albumA: true, playlist: true));
+
+        Assert.True(result.Completed, string.Join("\n", result.Failures));
+        Assert.Equal(3, result.Added);
+        var db = Database();
+        Assert.Equal(3, db.Tracks.Count);
+        var byTitle = db.Tracks.ToDictionary(t => t.Track.Title);
+        Assert.Equal(ItdbFileKind.AppleLossless, byTitle["Glósóli"].Track.Kind);
+        Assert.Equal(ItdbFileKind.Mp3, byTitle["River"].Track.Kind);
+        Assert.Equal("Sigur Rós", byTitle["Glósóli"].Track.Artist);
+        Assert.Equal("Takk...", byTitle["Glósóli"].Track.Album);
+        Assert.Equal(1u, byTitle["Glósóli"].Track.TrackNumber);
+        Assert.Equal(2005u, byTitle["Glósóli"].Track.Year);
+        Assert.Equal(44_100u, byTitle["Glósóli"].Track.SampleRate);
+        Assert.All(db.Tracks, t => Assert.Matches(@"^:iPod_Control:Music:F\d\d:[A-Z]{4}\.(m4a|mp3)$", t.Track.IpodPath));
+
+        var road = Assert.Single(db.Playlists, p => !p.IsMaster);
+        Assert.Equal("Road Trip", road.Name);
+        Assert.Equal([byTitle["River"].Id, byTitle["Glósóli"].Id, byTitle["River"].Id], road.TrackIds);
+        Assert.Equal("IPOD", db.Playlists[0].Name);
+        Assert.Equal(5, db.Playlists[0].SortIndexCount);
+
+        Assert.False(File.Exists(Local("/Playlists/Road Trip.m3u8")));
+        Assert.False(Directory.Exists(Local("/Music/Sigur Rós")));
+        Assert.Empty(Directory.GetFiles(_ipod, "cover.jpg", SearchOption.AllDirectories));
+        var manifest = await ManifestAsync();
+        Assert.Equal(DeviceManifest.FirmwareStock, manifest.Firmware);
+        Assert.All(manifest.Tracks, t => Assert.NotNull(t.Stock));
+        Assert.Contains("iPod library rebuilt: 3 tracks, 1 playlists", result.Report, StringComparison.Ordinal);
+        AssertStockLibraryIsSound();
+        AssertUserFilesUntouched();
+    }
+
+    [FfmpegFact]
+    public async Task Stock_ResyncWithNoChanges_TouchesNothing()
+    {
+        MakeStock();
+        await LibraryAsync();
+        await StockSyncAsync(Select(albumA: true, playlist: true));
+        var before = File.ReadAllBytes(Local(PlexPod.Device.Sync.DevicePaths.ItunesDbPath));
+        var downloads = _client.Downloads;
+
+        var preview = await Engine().PreviewAsync(await RequestAsync(Select(albumA: true, playlist: true), firmware: Stock), CancellationToken.None);
+
+        Assert.False(preview.HasWork);
+        Assert.Equal(before, File.ReadAllBytes(Local(PlexPod.Device.Sync.DevicePaths.ItunesDbPath)));
+        Assert.Equal(downloads, _client.Downloads);
+    }
+
+    [FfmpegFact]
+    public async Task Stock_PlaylistChangeInPlex_RebuildsTheDatabaseOnly()
+    {
+        MakeStock();
+        var (a1, a2, b1) = await LibraryAsync();
+        await StockSyncAsync(Select(albumA: true, playlist: true));
+        var downloads = _client.Downloads;
+
+        _contents["p1"] = new PlaylistContents("p1", [new(10, a2, false), new(11, a1, false), new(12, b1, false)]);
+        var preview = await Engine().PreviewAsync(await RequestAsync(Select(albumA: true, playlist: true), firmware: Stock), CancellationToken.None);
+        Assert.True(preview.Plan.IsEmpty);
+        Assert.True(preview.HasWork);
+        var result = await Engine().ExecuteAsync(preview, null, CancellationToken.None);
+
+        Assert.True(result.Completed, string.Join("\n", result.Failures));
+        Assert.Equal(downloads, _client.Downloads);
+        var db = Database();
+        var titles = db.Tracks.ToDictionary(t => t.Id, t => t.Track.Title);
+        Assert.Equal(["Hoppípolla", "Glósóli", "River"], Assert.Single(db.Playlists, p => !p.IsMaster).TrackIds.Select(id => titles[id]));
+    }
+
+    [FfmpegFact]
+    public async Task Stock_RemovedAlbum_LeavesTheDatabaseFirstThenTheFiles()
+    {
+        MakeStock();
+        await LibraryAsync();
+        await StockSyncAsync(Select(albumA: true, albumB: true));
+        var removedFiles = (await ManifestAsync()).Tracks.Where(t => t.Stock!.Album == "Takk...").Select(t => t.DevicePath).ToList();
+
+        var result = await StockSyncAsync(Select(albumA: false, albumB: true));
+
+        Assert.True(result.Completed, string.Join("\n", result.Failures));
+        Assert.Equal(2, result.Removed);
+        Assert.All(removedFiles, p => Assert.False(File.Exists(Local(p))));
+        Assert.Equal(["River"], Database().Tracks.Select(t => t.Track.Title));
+        AssertStockLibraryIsSound();
+    }
+
+    [FfmpegFact]
+    public async Task Stock_MakeRoom_WritesAnInterimDatabaseBeforeRemoving()
+    {
+        MakeStock();
+        await LibraryAsync();
+        await StockSyncAsync(Select(albumA: true, albumB: false));
+        var used = (await ManifestAsync()).ManagedBytes;
+
+        // Only room for the new album once the old one is gone.
+        var request = await RequestAsync(Select(albumA: false, albumB: true), firmware: Stock);
+        var roomy = (await Engine().PreviewAsync(request, CancellationToken.None)).Fit;
+        var tight = CapacityCalculator.ReserveBytes + roomy.BytesNeeded - (roomy.BytesFreed / 2);
+        var preview = await Engine(free: tight).PreviewAsync(request, CancellationToken.None);
+        Assert.True(preview.UsesMakeRoom, preview.Fit.ToString());
+        var result = await Engine().ExecuteAsync(preview, null, CancellationToken.None);
+
+        Assert.True(result.Completed, string.Join("\n", result.Failures));
+        Assert.Equal(["River"], Database().Tracks.Select(t => t.Track.Title));
+        AssertStockLibraryIsSound();
+        Assert.True(used > 0);
+    }
+
+    [FfmpegFact]
+    public async Task Stock_PlayCounts_ReachPlex_AreKeptOnTheIpod_AndTheFileIsDeleted()
+    {
+        MakeStock();
+        await LibraryAsync();
+        await StockSyncAsync(Select(albumA: true, playlist: true));
+        var db = Database();
+        var entries = db.Tracks.Select(t => t.Track.Title switch
+        {
+            "Glósóli" => new PlayCountEntry(2, new DateTime(2026, 10, 18, 8, 15, 0), 0, 80, 0, null),
+            "River" => new PlayCountEntry(0, null, 0, 0, 1, new DateTime(2026, 10, 18, 9, 0, 0)),
+            _ => new PlayCountEntry(0, null, 0, 0, 0, null),
+        }).ToList();
+        File.WriteAllBytes(Local(PlexPod.Device.Sync.DevicePaths.PlayCountsPath), PlayCountsReader.Write(entries));
+
+        var preview = await Engine().PreviewAsync(await RequestAsync(Select(albumA: true, playlist: true), stats: StatsOn, firmware: Stock), CancellationToken.None);
+        Assert.Equal((2, 1), preview.StockStats);
+        var result = await Engine().ExecuteAsync(preview, null, CancellationToken.None);
+
+        Assert.True(result.Completed, string.Join("\n", result.Failures));
+        Assert.Equal(["play:t1", "play:t1", "rate:t1=8"], _client.Writes);
+        Assert.False(File.Exists(Local(PlexPod.Device.Sync.DevicePaths.PlayCountsPath)));
+        var glosoli = Database().Tracks.Single(t => t.Track.Title == "Glósóli").Track;
+        Assert.Equal(2u, glosoli.PlayCount);
+        Assert.Equal(80, glosoli.Rating);
+        Assert.Equal(new DateTime(2026, 10, 18, 8, 15, 0), glosoli.LastPlayed);
+        Assert.Equal(1u, Database().Tracks.Single(t => t.Track.Title == "River").Track.SkipCount);
+        Assert.Contains("Sent 2 plays and 1 rating", result.Report, StringComparison.Ordinal);
+
+        await StockSyncAsync(Select(albumA: true, playlist: true), stats: StatsOn);
+        Assert.Equal(3, _client.Writes.Count); // nothing sent twice
+        Assert.Equal(2u, Database().Tracks.Single(t => t.Track.Title == "Glósóli").Track.PlayCount);
+    }
+
+    [FfmpegFact]
+    public async Task Stock_PlexDown_PlaysWaitAndAreSentNextTime()
+    {
+        MakeStock();
+        await LibraryAsync();
+        await StockSyncAsync(Select(albumA: true));
+        var db = Database();
+        File.WriteAllBytes(Local(PlexPod.Device.Sync.DevicePaths.PlayCountsPath),
+            PlayCountsReader.Write([.. db.Tracks.Select(_ => new PlayCountEntry(1, new DateTime(2026, 10, 18, 8, 0, 0), 0, 0, 0, null))]));
+
+        _client.FailWrite = _ => true;
+        var down = await StockSyncAsync(Select(albumA: true), stats: StatsOn);
+        Assert.True(down.Completed, string.Join("\n", down.Failures));
+        Assert.Empty(_client.Writes);
+        Assert.Contains("Couldn't reach Plex. 2 plays will be sent next time.", down.Report, StringComparison.Ordinal);
+        Assert.False(File.Exists(Local(PlexPod.Device.Sync.DevicePaths.PlayCountsPath)));
+
+        _client.FailWrite = null;
+        await StockSyncAsync(Select(albumA: true), stats: StatsOn);
+        Assert.Equal(["play:t1", "play:t2"], _client.Writes.Order());
+    }
+
+    [FfmpegFact]
+    public async Task Stock_AfterRockbox_OldLibraryAndPlaylistFilesAreCleanedUp()
+    {
+        await LibraryAsync();
+        await SyncAsync(Select(albumA: true, playlist: true)); // Rockbox era: /Music, /Playlists, cover.jpg
+        Assert.True(File.Exists(Local("/Playlists/Road Trip.m3u8")));
+        MakeStock();
+
+        var result = await StockSyncAsync(Select(albumA: true, playlist: true));
+
+        Assert.True(result.Completed, string.Join("\n", result.Failures));
+        Assert.False(File.Exists(Local("/Playlists/Road Trip.m3u8")));
+        Assert.False(Directory.Exists(Local("/Music/Sigur Rós")));
+        Assert.False(Directory.Exists(Local("/Music/Joni")));
+        Assert.Equal(3, Database().Tracks.Count);
+        Assert.Contains(result.Warnings, w => w.Contains("wrote for Rockbox will be removed", StringComparison.Ordinal));
+        AssertStockLibraryIsSound();
+        AssertUserFilesUntouched();
+    }
+
+    [FfmpegFact]
+    public async Task Stock_TrackThatFails_KeepsThePlaylistsPreviousVersion()
+    {
+        MakeStock();
+        var (a1, a2, b1) = await LibraryAsync();
+        await StockSyncAsync(Select(albumA: true, playlist: true));
+        var before = Assert.Single(Database().Playlists, p => !p.IsMaster).TrackIds.Count;
+
+        // Plex adds a new track to the playlist, and it fails to download.
+        _client.PartFiles[5] = _client.PartFiles[2];
+        var added = Track("t5", 5, "alA", "flac", 3, "Sé Lest");
+        SetLibrary([a1, a2, b1, added]);
+        _client.ExplodeOnDownload.Add(5);
+        _contents["p1"] = new PlaylistContents("p1", [new(10, b1, false), new(11, a1, false), new(14, added, false)]);
+
+        var result = await StockSyncAsync(Select(albumA: true, playlist: true));
+
+        Assert.False(result.Completed);
+        Assert.Contains(result.Failures, f => f.Contains("The previous version stays", StringComparison.Ordinal));
+        Assert.Equal(before, Assert.Single(Database().Playlists, p => !p.IsMaster).TrackIds.Count);
+        AssertStockLibraryIsSound();
+    }
+
+    // ---------------------------------------------------------------- rebrand
 
     private async Task<DeviceManifest> ManifestAsync() => (await new DeviceStore(_ipod).LoadManifestAsync(CancellationToken.None)).Manifest!;
 

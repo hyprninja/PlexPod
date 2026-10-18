@@ -31,7 +31,8 @@ public sealed record FitResult(
 /// <summary>The gate before anything is written (M3 plan §4). Conservative: estimates never under.</summary>
 public static class FitCheck
 {
-    public static FitResult Evaluate(SyncPlan plan, long freeBytes)
+    /// <param name="reserveBytes">Extra room needed besides tracks and playlists (the stock firmware's database and its temp copy).</param>
+    public static FitResult Evaluate(SyncPlan plan, long freeBytes, long reserveBytes = 0)
     {
         ArgumentNullException.ThrowIfNull(plan);
 
@@ -60,7 +61,7 @@ public static class FitCheck
             }
         }
 
-        var needed = added + growth + largestOverwrite + PlaylistBytes(plan);
+        var needed = added + growth + largestOverwrite + PlaylistBytes(plan) + Math.Max(0, reserveBytes);
         var freed = plan.TrackRemovals.Sum(t => t.SizeBytes);
         var usable = Math.Max(0, freeBytes - CapacityCalculator.ReserveBytes);
         var outcome = needed <= usable ? FitOutcome.Fits

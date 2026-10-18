@@ -28,7 +28,17 @@ public sealed class ConversionCache(MediaPaths paths)
         _ => throw new ArgumentException("Copies aren't cached.", nameof(action)),
     };
 
-    public string PathFor(string key) => Path.Combine(paths.Converted, key + ".flac");
+    /// <summary>Apple Lossless made from a part (after any hi-res conversion), for the stock firmware.</summary>
+    public static string AlacKey(long partId, string partKey, FlacAction action) => action switch
+    {
+        FlacAction.Convert c => string.Create(CultureInfo.InvariantCulture, $"{SourceKey(partId, partKey)}-v{ProfileVersion}-alac-{c.TargetBits}x{c.TargetRateHz}"),
+        _ => string.Create(CultureInfo.InvariantCulture, $"{SourceKey(partId, partKey)}-v{ProfileVersion}-alac"),
+    };
+
+    public string PathFor(string key) => Path.Combine(paths.Converted, key + (key.Contains("-alac", StringComparison.Ordinal) ? ".m4a" : ".flac"));
+
+    private IEnumerable<FileInfo> CachedFiles() =>
+        new DirectoryInfo(paths.Converted).EnumerateFiles("*.flac").Concat(new DirectoryInfo(paths.Converted).EnumerateFiles("*.m4a"));
 
     public bool TryGet(string key, out string path)
     {
@@ -65,7 +75,7 @@ public sealed class ConversionCache(MediaPaths paths)
         return path;
     }
 
-    public long SizeBytes() => new DirectoryInfo(paths.Converted).EnumerateFiles("*.flac").Sum(f => f.Length);
+    public long SizeBytes() => CachedFiles().Sum(f => f.Length);
 
     /// <summary>Part id + a short hash of the part key (file-name safe; the key changes when the file does).</summary>
     public static string SourceKey(long partId, string partKey) =>
@@ -94,7 +104,7 @@ public sealed class ConversionCache(MediaPaths paths)
 
     private void Evict(string keep)
     {
-        var files = new DirectoryInfo(paths.Converted).EnumerateFiles("*.flac").OrderBy(f => f.LastAccessTimeUtc).ToList();
+        var files = CachedFiles().OrderBy(f => f.LastAccessTimeUtc).ToList();
         var total = files.Sum(f => f.Length);
         foreach (var file in files)
         {

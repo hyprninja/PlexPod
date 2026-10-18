@@ -120,6 +120,8 @@ public sealed class DeviceStore(string driveRoot)
                 // The file is untrusted: drop null or nonsense entries.
                 Bookmarks = (state.Bookmarks ?? []).Where(b => b is { PrefixHash.Length: 64, FileName: not null, ProcessedBytes: > 0 }).ToList(),
                 RatingsSent = state.RatingsSent ?? new Dictionary<string, int>(),
+                PendingPlays = (state.PendingPlays ?? new Dictionary<string, int>()).Where(p => p.Value > 0).ToDictionary(p => p.Key, p => Math.Min(p.Value, 10_000)),
+                PendingRatings = (state.PendingRatings ?? new Dictionary<string, int>()).Where(p => p.Value is >= -1 and <= 10).ToDictionary(p => p.Key, p => p.Value),
             }
             : StatsState.Empty;
 

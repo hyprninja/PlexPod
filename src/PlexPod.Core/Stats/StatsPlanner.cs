@@ -34,6 +34,15 @@ public sealed record StatsState
     /// <summary>Last rating sent to Plex per track rating key (0–10).</summary>
     public IReadOnlyDictionary<string, int> RatingsSent { get; init; } = new Dictionary<string, int>();
 
+    /// <summary>
+    /// Stock firmware (M6): plays taken from the iPod's Play Counts that Plex hasn't accepted yet, per
+    /// track rating key. Play Counts is deleted once read, so these are the only record until sent.
+    /// </summary>
+    public IReadOnlyDictionary<string, int> PendingPlays { get; init; } = new Dictionary<string, int>();
+
+    /// <summary>Stock firmware: ratings changed on the iPod (0–10, or -1 for cleared) not yet accepted by Plex.</summary>
+    public IReadOnlyDictionary<string, int> PendingRatings { get; init; } = new Dictionary<string, int>();
+
     public static StatsState Empty { get; } = new();
 }
 

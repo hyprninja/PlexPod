@@ -556,7 +556,7 @@ public static class ItunesDbWriter
     }
 
     /// <summary>A deterministic 64-bit id (libgpod uses random ones; these keep rebuilds byte-identical).</summary>
-    internal static ulong StableId(string key) =>
+    public static ulong StableId(string key) =>
         BinaryPrimitives.ReadUInt64LittleEndian(SHA256.HashData(Encoding.UTF8.GetBytes(key)));
 
     private sealed record AlbumEntry(uint Id, string Album, string? Artist, string? SortArtist);

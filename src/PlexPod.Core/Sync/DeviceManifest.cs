@@ -43,6 +43,12 @@ public sealed record ManifestTrack
 
     /// <summary>What the pipeline did, for reports ("copied (FLAC 16/44.1)", "converted 24/96 → 16/44.1").</summary>
     public string Action { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Stock firmware only (M6): the track's iTunesDB record as last written, including the play count
+    /// and rating carried from the iPod. The database is rebuilt from these on every sync.
+    /// </summary>
+    public ItunesDb.ItdbTrack? Stock { get; init; }
 }
 
 /// <summary>Another file PlexPod owns, such as an album folder's <c>cover.jpg</c> (PictureFlow).</summary>
@@ -59,6 +65,16 @@ public sealed record DeviceManifest
     public int Version { get; init; } = CurrentVersion;
 
     public required string DeviceId { get; init; }
+
+    /// <summary><see cref="FirmwareRockbox"/> (the default, for manifests from before M6) or <see cref="FirmwareStock"/>.</summary>
+    public string Firmware { get; init; } = FirmwareRockbox;
+
+    public const string FirmwareRockbox = "rockbox";
+
+    public const string FirmwareStock = "stock";
+
+    /// <summary>Stock firmware: what the iTunesDB on the iPod was built from (tracks, stamps, playlists), to tell whether it needs rebuilding.</summary>
+    public string? StockDatabaseSignature { get; init; }
 
     public DateTimeOffset UpdatedAt { get; init; }
 

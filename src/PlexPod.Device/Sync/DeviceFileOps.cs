@@ -156,7 +156,7 @@ public sealed class DeviceFileOps
     public static int CleanTempFiles(string driveRoot)
     {
         var count = 0;
-        foreach (var folder in new[] { "Music", "Playlists", DeviceStore.FolderName, DeviceStore.LegacyFolderName })
+        foreach (var folder in new[] { "Music", "Playlists", "iPod_Control/Music", "iPod_Control/iTunes", DeviceStore.FolderName, DeviceStore.LegacyFolderName })
         {
             var local = Path.Combine(driveRoot, folder);
             if (!Directory.Exists(local))

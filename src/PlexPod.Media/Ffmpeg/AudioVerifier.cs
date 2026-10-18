@@ -45,6 +45,21 @@ public sealed partial class AudioVerifier(FfmpegRunner runner)
         }
     }
 
+    /// <summary>FLAC → Apple Lossless: the decoded 16-bit samples must be identical.</summary>
+    public async Task VerifyAlacAsync(FfmpegInstall ffmpeg, string sourceFlac, string alac, CancellationToken ct)
+    {
+        var before = await Pcm16Md5Async(ffmpeg, sourceFlac, ct).ConfigureAwait(false);
+        var after = await Pcm16Md5Async(ffmpeg, alac, ct).ConfigureAwait(false);
+        if (before != after)
+        {
+            throw new VerificationException("Apple Lossless output doesn't match the FLAC samples (decoded checksum differs).");
+        }
+    }
+
+    /// <summary>Decoded audio as interleaved 16-bit PCM, so FLAC (interleaved) and ALAC (planar) compare like for like.</summary>
+    private Task<string> Pcm16Md5Async(FfmpegInstall ffmpeg, string path, CancellationToken ct) =>
+        Md5Async(ffmpeg, ["-hide_banner", "-nostdin", "-v", "error", "-i", path, "-map", "0:a:0", "-c:a", "pcm_s16le", "-f", "md5", "-"], ct);
+
     /// <summary>Lossless re-encodes: the decoded samples must be identical and the frames small enough.</summary>
     public async Task VerifyLosslessAsync(FfmpegInstall ffmpeg, string source, string output, CancellationToken ct)
     {

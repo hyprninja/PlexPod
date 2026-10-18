@@ -16,6 +16,23 @@ public sealed class FlacConverter(FfmpegRunner runner)
         await runner.RunAsync(ffmpeg.Path, args, ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// D12: FLAC (at most 16-bit/44.1 kHz by now) to Apple Lossless in an iPod-style <c>.m4a</c>, for the
+    /// stock firmware. Lossless: the samples are copied exactly, nothing is resampled or dithered.
+    /// </summary>
+    public async Task ToAlacAsync(FfmpegInstall ffmpeg, string inputFlac, string outputM4a, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(ffmpeg);
+        await runner.RunAsync(ffmpeg.Path, AlacArguments(inputFlac, outputM4a), ct).ConfigureAwait(false);
+    }
+
+    public static IReadOnlyList<string> AlacArguments(string inputFlac, string outputM4a) =>
+    [
+        "-hide_banner", "-nostdin", "-v", "error", "-y", "-i", inputFlac,
+        "-map", "0:a:0", "-map_metadata", "-1", "-c:a", "alac", "-sample_fmt", "s16p",
+        "-fflags", "+bitexact", "-f", "ipod", outputM4a,
+    ];
+
     /// <exception cref="NotSupportedException">The action can't be done without raising a value.</exception>
     public static IReadOnlyList<string> BuildArguments(FfmpegInstall ffmpeg, string input, string output, FlacStreamInfo source, FlacAction action)
     {

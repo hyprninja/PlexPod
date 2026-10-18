@@ -12,8 +12,18 @@ public static class DevicePaths
     /// <summary>Temp files left by an interrupted sync before the rename; also PlexPod's own.</summary>
     public const string LegacyTempSuffix = ".rockplex-tmp";
 
-    /// <summary>The only top-level folders PlexPod ever writes to or deletes from (besides <c>/.plexpod</c>).</summary>
-    public static readonly IReadOnlyList<string> ManagedRoots = ["/Music/", "/Playlists/"];
+    /// <summary>
+    /// The only folders PlexPod ever writes to or deletes from (besides <c>/.plexpod</c>): Rockbox's
+    /// <c>/Music</c> and <c>/Playlists</c>, and the stock firmware's music folders.
+    /// </summary>
+    public static readonly IReadOnlyList<string> ManagedRoots = ["/Music/", "/Playlists/", "/iPod_Control/Music/"];
+
+    public const string ItunesDbPath = "/iPod_Control/iTunes/iTunesDB";
+
+    public const string PlayCountsPath = "/iPod_Control/iTunes/Play Counts";
+
+    /// <summary>The stock firmware's database, rebuilt by PlexPod, and its Play Counts, consumed and deleted as iTunes does (D14).</summary>
+    public static readonly IReadOnlyList<string> ManagedFiles = [ItunesDbPath, PlayCountsPath];
 
     /// <exception cref="ArgumentException">Not a safe absolute device path, or it would resolve outside the drive.</exception>
     public static string ToLocal(string driveRoot, string devicePath)
@@ -58,14 +68,16 @@ public static class DevicePaths
 
     /// <summary>True for a well-formed path inside <c>/Music/</c> or <c>/Playlists/</c>, the folders PlexPod manages.</summary>
     public static bool IsManaged(string? devicePath) =>
-        IsWellFormed(devicePath) && ManagedRoots.Any(root => devicePath!.StartsWith(root, StringComparison.OrdinalIgnoreCase));
+        IsWellFormed(devicePath)
+        && (ManagedRoots.Any(root => devicePath!.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+            || ManagedFiles.Any(file => string.Equals(devicePath, file, StringComparison.OrdinalIgnoreCase)));
 
     /// <exception cref="InvalidOperationException">The path is outside the folders PlexPod manages.</exception>
     public static void EnsureManaged(string devicePath)
     {
         if (!IsManaged(devicePath))
         {
-            throw new InvalidOperationException($"Refusing to change {devicePath}: PlexPod only manages /Music and /Playlists.");
+            throw new InvalidOperationException($"Refusing to change {devicePath}: PlexPod only manages /Music, /Playlists, /iPod_Control/Music and the iTunesDB.");
         }
     }
 

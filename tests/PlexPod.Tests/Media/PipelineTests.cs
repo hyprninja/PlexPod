@@ -36,6 +36,67 @@ public sealed class PipelineTests : IDisposable
     private TrackJob Job(TrackItem track, string output) =>
         new(track, Album, null, [track], null, null, TagPolicy.Default, output);
 
+    private TrackJob StockJob(TrackItem track, string output) =>
+        new(track, Album, null, [track], null, null, TagPolicy.Default, output, Target: PlexPod.Device.IpodFirmware.Stock);
+
+    [FfmpegFact]
+    public async Task Stock_HiResFlac_BecomesTaggedAppleLossless_16_44()
+    {
+        var ffmpeg = await TestFfmpeg.InstallAsync();
+        var client = new FakeLibraryClient();
+        client.PartFiles[1] = await TestFfmpeg.MakeFlacAsync(_dir.File("hires.flac"), 96_000, 24);
+        var output = _dir.File("out.m4a");
+
+        var result = await Pipeline(out _).ProcessAsync(client, ffmpeg, StockJob(Track("t1", 1, "flac", 1, "Glósóli"), output), CancellationToken.None);
+
+        Assert.Equal(PlexPod.Core.ItunesDb.ItdbFileKind.AppleLossless, result.Audio.Kind);
+        Assert.Equal(44_100u, result.Audio.SampleRate);
+        Assert.InRange(result.Audio.LengthMs, 900u, 1100u);
+        Assert.StartsWith("Apple Lossless 16/44.1 (converted from FLAC 24/96)", result.Action, StringComparison.Ordinal);
+        Assert.Contains(TagWriter.ReadBack(output).Fields, f => f is { Key: "TITLE", Value: "Glósóli" });
+        var probe = await TestFfmpeg.Runner.RunAsync(ffmpeg.Path, ["-hide_banner", "-i", output], CancellationToken.None, throwOnError: false);
+        Assert.Contains("Audio: alac", probe.StandardError, StringComparison.Ordinal);
+        Assert.Contains("s16p", probe.StandardError, StringComparison.Ordinal);
+        Assert.Contains("44100 Hz", probe.StandardError, StringComparison.Ordinal);
+    }
+
+    [FfmpegFact]
+    public async Task Stock_CdQualityFlac_IsAppleLossless_SameSamples()
+    {
+        var ffmpeg = await TestFfmpeg.InstallAsync();
+        var client = new FakeLibraryClient();
+        var src = await TestFfmpeg.MakeFlacAsync(_dir.File("cd.flac"), 44_100, 16);
+        client.PartFiles[2] = src;
+        var output = _dir.File("cd.m4a");
+
+        var result = await Pipeline(out var cache).ProcessAsync(client, ffmpeg, StockJob(Track("t2", 2, "flac"), output), CancellationToken.None);
+
+        Assert.Equal("Apple Lossless (from FLAC 16/44.1)", result.Action);
+        await _verifier.VerifyAlacAsync(ffmpeg, src, output, CancellationToken.None); // throws if a sample differs
+        Assert.True(cache.TryGet(ConversionCache.AlacKey(2, Track("t2", 2, "flac").Parts[0].Key, FlacAction.Copy.Instance), out var cached));
+        Assert.EndsWith(".m4a", cached, StringComparison.Ordinal);
+
+        var again = await Pipeline(out _).ProcessAsync(client, ffmpeg, StockJob(Track("t2", 2, "flac"), _dir.File("cd2.m4a")), CancellationToken.None);
+        Assert.True(again.FromCache);
+    }
+
+    [FfmpegFact]
+    public async Task Stock_Mp3_IsCopied_AndOgg_IsRefused()
+    {
+        var ffmpeg = await TestFfmpeg.InstallAsync();
+        var client = new FakeLibraryClient();
+        client.PartFiles[3] = _dir.CopyFixture("tone.mp3");
+        var mp3 = await Pipeline(out _).ProcessAsync(client, ffmpeg, StockJob(Track("t3", 3, "mp3"), _dir.File("x.mp3")), CancellationToken.None);
+        Assert.Equal(PlexPod.Core.ItunesDb.ItdbFileKind.Mp3, mp3.Audio.Kind);
+        Assert.Equal("copied (mp3)", mp3.Action);
+
+        var ogg = _dir.File("tone.ogg");
+        await TestFfmpeg.Runner.RunAsync(ffmpeg.Path, ["-hide_banner", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=500:duration=1", "-c:a", "libvorbis", ogg], CancellationToken.None);
+        client.PartFiles[4] = ogg;
+        var ex = await Assert.ThrowsAsync<PipelineException>(() => Pipeline(out _).ProcessAsync(client, ffmpeg, StockJob(Track("t4", 4, "ogg"), _dir.File("x.ogg")), CancellationToken.None));
+        Assert.Contains("doesn't play on the iPod's Apple firmware", ex.Message, StringComparison.Ordinal);
+    }
+
     [FfmpegFact]
     public async Task HiRes_24_96_IsConvertedTo_16_44_AndVerified()
     {
