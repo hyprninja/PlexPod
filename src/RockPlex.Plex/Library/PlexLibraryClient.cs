@@ -1,6 +1,7 @@
 using System.Globalization;
 using Microsoft.Extensions.Logging;
 using RockPlex.Core.Models;
+using RockPlex.Core.Tagging;
 using RockPlex.Plex.Dto;
 using RockPlex.Plex.Http;
 using RockPlex.Plex.Servers;
@@ -8,6 +9,9 @@ using RockPlex.Plex.Servers;
 namespace RockPlex.Plex.Library;
 
 public sealed record MusicSection(string Key, string Title, string? Uuid);
+
+/// <summary>A track's full metadata: stream details plus the MusicBrainz track ID when Plex has one.</summary>
+public sealed record PlexTrackDetail(TrackItem Track, string? MusicBrainzTrackId);
 
 /// <summary>Read-only access to one server's music library.</summary>
 public interface IPlexLibraryClient
@@ -27,7 +31,20 @@ public interface IPlexLibraryClient
     Task<PlaylistContents> GetPlaylistContentsAsync(PlaylistItem playlist, CancellationToken ct);
 
     /// <summary>Full metadata for one track, including the audio stream's bit depth and sample rate.</summary>
-    Task<TrackItem?> GetTrackDetailAsync(string ratingKey, CancellationToken ct);
+    Task<PlexTrackDetail?> GetTrackDetailAsync(string ratingKey, CancellationToken ct);
+
+    Task<AlbumDetail?> GetAlbumDetailAsync(string albumKey, CancellationToken ct);
+
+    Task<ArtistDetail?> GetArtistDetailAsync(string artistKey, CancellationToken ct);
+
+    /// <summary>
+    /// Streams the original file to <paramref name="destination"/> (read-only <c>?download=1</c>).
+    /// Throws <see cref="PlexProtocolException"/> if the byte count doesn't match <c>Part.size</c>.
+    /// </summary>
+    Task<long> DownloadPartAsync(MediaPartRef part, Stream destination, IProgress<long>? progress, CancellationToken ct);
+
+    /// <summary>Full-size bytes of an image path such as an album <c>thumb</c>.</summary>
+    Task<byte[]> DownloadImageAsync(string imagePath, CancellationToken ct);
 }
 
 public interface IPlexLibraryClientFactory
@@ -60,6 +77,8 @@ public sealed class PlexLibraryClient(
     private const int ArtistType = 8;
     private const int AlbumType = 9;
     private const int TrackType = 10;
+
+    private static readonly TimeSpan MetadataTimeout = TimeSpan.FromSeconds(100);
 
     public PlexServerConnection Connection => connection;
 
@@ -100,12 +119,72 @@ public sealed class PlexLibraryClient(
         return new PlaylistContents(playlist.RatingKey, entries);
     }
 
-    public async Task<TrackItem?> GetTrackDetailAsync(string ratingKey, CancellationToken ct)
+    public async Task<PlexTrackDetail?> GetTrackDetailAsync(string ratingKey, CancellationToken ct)
+    {
+        var item = await GetMetadataAsync(ratingKey, "?includeGuids=1", ct).ConfigureAwait(false);
+        return item is null ? null : new PlexTrackDetail(PlexMapper.ToTrack(item), PlexMapper.MusicBrainzId(item));
+    }
+
+    public async Task<AlbumDetail?> GetAlbumDetailAsync(string albumKey, CancellationToken ct)
+    {
+        var item = await GetMetadataAsync(albumKey, string.Empty, ct).ConfigureAwait(false);
+        return item is null ? null : PlexMapper.ToAlbumDetail(item);
+    }
+
+    public async Task<ArtistDetail?> GetArtistDetailAsync(string artistKey, CancellationToken ct)
+    {
+        var item = await GetMetadataAsync(artistKey, string.Empty, ct).ConfigureAwait(false);
+        return item is null ? null : PlexMapper.ToArtistDetail(item);
+    }
+
+    public async Task<long> DownloadPartAsync(MediaPartRef part, Stream destination, IProgress<long>? progress, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(part);
+        ArgumentNullException.ThrowIfNull(destination);
+
+        using var request = CreateRequest(part.Key, "?download=1");
+        logger.LogDebug("Download part {PartId}", part.PartId);
+        using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+
+        var source = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+        await using (source.ConfigureAwait(false))
+        {
+            var buffer = new byte[1 << 17];
+            long total = 0;
+            int read;
+            while ((read = await source.ReadAsync(buffer, ct).ConfigureAwait(false)) > 0)
+            {
+                await destination.WriteAsync(buffer.AsMemory(0, read), ct).ConfigureAwait(false);
+                total += read;
+                progress?.Report(total);
+            }
+
+            if (part.SizeBytes > 0 && total != part.SizeBytes)
+            {
+                throw new PlexProtocolException($"Download of part {part.PartId} returned {total:N0} bytes; Plex reported {part.SizeBytes:N0}.");
+            }
+
+            return total;
+        }
+    }
+
+    public async Task<byte[]> DownloadImageAsync(string imagePath, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(imagePath);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(MetadataTimeout);
+        using var request = CreateRequest(imagePath, string.Empty);
+        using var response = await http.SendAsync(request, timeout.Token).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadAsByteArrayAsync(timeout.Token).ConfigureAwait(false);
+    }
+
+    private async Task<MetadataDto?> GetMetadataAsync(string ratingKey, string query, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrEmpty(ratingKey);
-        var container = await GetContainerAsync($"/library/metadata/{Uri.EscapeDataString(ratingKey)}", null, ct).ConfigureAwait(false);
-        var item = container.Metadata?.FirstOrDefault();
-        return item is null ? null : PlexMapper.ToTrack(item);
+        var container = await GetContainerAsync($"/library/metadata/{Uri.EscapeDataString(ratingKey)}{query}", null, ct).ConfigureAwait(false);
+        return container.Metadata?.FirstOrDefault();
     }
 
     private async Task<IReadOnlyList<T>> GetSectionItemsAsync<T>(
@@ -143,8 +222,12 @@ public sealed class PlexLibraryClient(
 
     private async Task<MediaContainerDto> GetContainerAsync(string path, (int Start, int Size)? page, CancellationToken ct)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, Combine(connection.BaseUri, path));
-        request.Headers.TryAddWithoutValidation(PlexHeadersHandler.TokenHeader, connection.AccessToken);
+        // The HttpClient has no overall timeout (downloads can take minutes), so metadata calls get their own.
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(MetadataTimeout);
+        ct = timeout.Token;
+
+        using var request = CreateRequest(path, string.Empty);
         if (page is var (start, size))
         {
             request.Headers.TryAddWithoutValidation("X-Plex-Container-Start", start.ToString(CultureInfo.InvariantCulture));
@@ -156,6 +239,13 @@ public sealed class PlexLibraryClient(
         response.EnsureSuccessStatusCode();
         var envelope = await PlexJson.ReadAsync<ContainerEnvelope>(response, ct).ConfigureAwait(false);
         return envelope.MediaContainer ?? new MediaContainerDto();
+    }
+
+    private HttpRequestMessage CreateRequest(string path, string query)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, Combine(connection.BaseUri, path + query));
+        request.Headers.TryAddWithoutValidation(PlexHeadersHandler.TokenHeader, connection.AccessToken);
+        return request;
     }
 
     /// <summary>Appends an absolute Plex path to the base, keeping any path prefix (reverse proxies).</summary>

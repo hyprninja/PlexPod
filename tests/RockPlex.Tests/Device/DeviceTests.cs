@@ -133,6 +133,50 @@ public sealed class DeviceTests : IDisposable
     }
 
     [Fact]
+    public async Task Watcher_Start_NeverScansOnTheCallingContext()
+    {
+        // A slow drive scan must not run on the caller's (UI) context.
+        var context = new RecordingContext();
+        var scanThread = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var locator = new SlowLocator(() => scanThread.TrySetResult(Environment.CurrentManagedThreadId));
+        await using var watcher = new DeviceWatcher(locator, TimeProvider.System) { Interval = TimeSpan.FromSeconds(10) };
+
+        var previous = SynchronizationContext.Current;
+        SynchronizationContext.SetSynchronizationContext(context);
+        try
+        {
+            watcher.Start();
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previous);
+        }
+
+        await scanThread.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(0, context.Posts);
+    }
+
+    private sealed class RecordingContext : SynchronizationContext
+    {
+        public int Posts { get; private set; }
+
+        public override void Post(SendOrPostCallback d, object? state)
+        {
+            Posts++;
+            base.Post(d, state);
+        }
+    }
+
+    private sealed class SlowLocator(Action onScan) : IRockboxDeviceLocator
+    {
+        public IReadOnlyList<RockboxDevice> FindDevices()
+        {
+            onScan();
+            return [];
+        }
+    }
+
+    [Fact]
     public async Task Watcher_StartPollsInBackground()
     {
         var drives = new FakeDrives();

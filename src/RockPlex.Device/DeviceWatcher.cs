@@ -48,7 +48,11 @@ public sealed class DeviceWatcher(IRockboxDeviceLocator locator, TimeProvider ti
             }
 
             _cts = new CancellationTokenSource();
-            _loop = RunAsync(_cts.Token);
+            var token = _cts.Token;
+
+            // Task.Run, not Task.Yield: called from the UI thread, Task.Yield would resume there and
+            // the first (possibly slow) drive scan would freeze the window.
+            _loop = Task.Run(() => RunAsync(token), token);
         }
     }
 
@@ -112,7 +116,6 @@ public sealed class DeviceWatcher(IRockboxDeviceLocator locator, TimeProvider ti
 
     private async Task RunAsync(CancellationToken ct)
     {
-        await Task.Yield();
         using var timer = new PeriodicTimer(Interval, time);
         do
         {

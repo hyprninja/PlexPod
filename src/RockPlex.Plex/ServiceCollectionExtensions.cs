@@ -21,6 +21,7 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<InMemoryPlexTokenProvider>();
         services.TryAddSingleton<IPlexTokenProvider>(sp => sp.GetRequiredService<InMemoryPlexTokenProvider>());
         services.AddTransient<PlexHeadersHandler>();
+        services.AddTransient<TransientRetryHandler>();
 
         services.AddHttpClient<IPlexAuthService, PlexAuthService>(PlexAuthService.HttpClientName, http =>
             {
@@ -28,10 +29,13 @@ public static class ServiceCollectionExtensions
                 http.Timeout = TimeSpan.FromSeconds(30);
             })
             .AddHttpMessageHandler<PlexHeadersHandler>()
+            .AddHttpMessageHandler<TransientRetryHandler>()
             .RedactLoggedHeaders(_ => true);
 
-        services.AddHttpClient(PlexLibraryClient.HttpClientName, http => http.Timeout = TimeSpan.FromSeconds(100))
+        // No overall timeout: original-file downloads can take minutes. Metadata calls set their own.
+        services.AddHttpClient(PlexLibraryClient.HttpClientName, http => http.Timeout = Timeout.InfiniteTimeSpan)
             .AddHttpMessageHandler<PlexHeadersHandler>()
+            .AddHttpMessageHandler<TransientRetryHandler>()
             .RedactLoggedHeaders(_ => true);
 
         services.AddSingleton<IPlexServerDiscovery, PlexServerDiscovery>();

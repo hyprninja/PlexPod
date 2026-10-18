@@ -1,0 +1,24 @@
+using Microsoft.Extensions.DependencyInjection;
+using RockPlex.Media.Art;
+using RockPlex.Media.Ffmpeg;
+using RockPlex.Media.Pipeline;
+
+namespace RockPlex.Media;
+
+public static class ServiceCollectionExtensions
+{
+    /// <summary>Registers the media pipeline, with its caches under <paramref name="cacheRoot"/>.</summary>
+    public static IServiceCollection AddRockPlexMedia(this IServiceCollection services, string cacheRoot)
+    {
+        services.AddSingleton(new MediaPaths(cacheRoot));
+        services.AddSingleton<FfmpegRunner>();
+        services.AddSingleton<FfmpegLocator>();
+        services.AddSingleton<FlacConverter>();
+        services.AddSingleton<AudioVerifier>();
+        services.AddSingleton<ConversionCache>();
+        services.AddSingleton<AlbumArtProvider>();
+        services.AddSingleton<TrackPipeline>();
+        services.AddSingleton<TestExportService>();
+        return services;
+    }
+}

@@ -109,7 +109,8 @@ public sealed class PlexAuthService(
         request.Headers.TryAddWithoutValidation(PlexHeadersHandler.TokenHeader, token);
         try
         {
-            using var response = await http.SendAsync(request, ct).ConfigureAwait(false);
+            // Headers only: the status code decides validity, and the body is just the display name.
+            using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
             if (response.StatusCode == HttpStatusCode.Unauthorized)
             {
                 return new TokenValidation(TokenStatus.Invalid);
@@ -121,8 +122,8 @@ public sealed class PlexAuthService(
                 return new TokenValidation(TokenStatus.Unreachable);
             }
 
-            var user = await PlexJson.ReadAsync<UserDto>(response, ct).ConfigureAwait(false);
-            return new TokenValidation(TokenStatus.Valid, user.Username ?? user.Title);
+            var name = await TryReadUsernameAsync(response, ct).ConfigureAwait(false);
+            return new TokenValidation(TokenStatus.Valid, name);
         }
         catch (HttpRequestException ex)
         {
@@ -133,6 +134,27 @@ public sealed class PlexAuthService(
         {
             logger.LogWarning("plex.tv user check timed out");
             return new TokenValidation(TokenStatus.Unreachable);
+        }
+    }
+
+    /// <summary>
+    /// plex.tv sometimes sends the 200 headers promptly and then stalls on the body for about 20 s.
+    /// The token is already known to be valid, so give up on the name after a short wait; disposing the
+    /// response then drops that connection rather than leaving a stalled one in the pool.
+    /// </summary>
+    private async Task<string?> TryReadUsernameAsync(HttpResponseMessage response, CancellationToken ct)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(options.UserInfoTimeout);
+        try
+        {
+            var user = await PlexJson.ReadAsync<UserDto>(response, timeout.Token).ConfigureAwait(false);
+            return user.Username ?? user.Title;
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested && ex is OperationCanceledException or HttpRequestException or IOException or System.Text.Json.JsonException or PlexProtocolException)
+        {
+            logger.LogInformation("plex.tv user details didn't arrive ({Error}); signed in without a display name", ex.GetType().Name);
+            return null;
         }
     }
 }

@@ -2,12 +2,12 @@
 
 RockPlex is a **Windows desktop app (.NET 10, WPF, Fluent theme)** that syncs a **Plex Media Server music library** to an **iPod 5.5G (Video) 80 GB running Rockbox**. Plex is the source of truth. The iPod should show exactly what Plex shows.
 
-**Status (18 Oct 2026):** **Milestone 1 is implemented** (`docs/M1-plan.md`): it builds clean and all 88 tests pass. Not yet checked against a real Plex server: sign-in, discovery, library load, enrichment. The JSON fixtures are representative, not captured. Verified by the owner against the real server (sign-in, discovery, playlist sizing). **Next: Milestone 2**, see `docs/M2-plan.md` (owner decisions D1–D3 are in its §8).
+**Status (18 Oct 2026):** M1 is done and verified by the owner against the real server. **Milestone 2 (media pipeline) is implemented** (`docs/M2-plan.md`, owner decisions D1–D4 in its §8): it builds clean and all 189 tests pass, including real ffmpeg conversions. **Not yet checked by the owner:** a Test export of real albums (acceptance criteria 2–5, 7) and the on-iPod spike tests. The Plex JSON fixtures are still representative, not captured. Next: verify M2, then **Milestone 3** (sync engine).
 
 ## Read these first
 | File | What's in it |
 |---|---|
-| `docs/M2-plan.md` | **What to build now.** Media pipeline: projects, classes, tests, acceptance criteria, owner decisions D1–D3 |
+| `docs/M2-plan.md` | Milestone 2 (implemented): media pipeline, acceptance criteria, owner decisions D1–D4 |
 | `docs/M1-plan.md` | Milestone 1 (done): foundation + pickers |
 | `RockPlex-Research-Brief.md` | Plex API + Rockbox research, prior art, sources |
 | `RockPlex-Media-Pipeline.md` | Format rule, tag rewrite, album art (Milestone 2) |
@@ -35,6 +35,8 @@ Status markers in those docs: ✅ verified from a primary source · ⚠️ infer
 - **The fit check is conservative**: when a format is unknown, assume the larger size; never underestimate.
 - **Plex tokens are stored only with DPAPI (CurrentUser)**, never in plaintext and never logged.
 - `RockPlex.Core` has **no package dependencies** and no I/O.
+- **Device tags follow `TagPolicy`** (D4): every field can be stripped; only the `ROCKPLEX_*` ID tags are always written. Folder names come from Plex values, never from the (possibly stripped) tags.
+- **Nothing reaches the UI thread that touches drives or the network synchronously** (a disconnected mapped drive or a waking iPod disk can block for ~20 s).
 
 ## Conventions
 - Classes are `sealed` by default; records for immutable models; nullable enabled; warnings as errors.
@@ -42,7 +44,9 @@ Status markers in those docs: ✅ verified from a primary source · ⚠️ infer
 - MVVM via **CommunityToolkit.Mvvm**; DI via **Microsoft.Extensions.Hosting** (generic host in `App.xaml.cs`); one `ServiceCollectionExtensions` per project (`AddRockPlexPlex()`, `AddRockPlexDevice()`, …).
 - HTTP via `IHttpClientFactory`; JSON via `System.Text.Json` (Plex sends `ratingKey` as a **string**; allow numbers-as-strings).
 - Tests: xUnit; Plex tests use a fake `HttpMessageHandler` + JSON fixtures; device tests use temp directories as fake drives.
-- App data: `%LOCALAPPDATA%\RockPlex\` (`settings.json`, `token.bin`, `logs\`, later `cache\`).
+- App data: `%LOCALAPPDATA%\RockPlex\` (`settings.json`, `token.bin`, `logs\`, `cache\` = `work\`, `converted\`, `art\`).
+- `RockPlex.Media` is `net10.0-windows` (WIC for baseline JPEG art); so is the test project. ffmpeg is found, never bundled (settings path → PATH → winget).
+- Edit source files with tools that keep UTF-8 intact. Windows PowerShell 5.1's `Get-Content`/`Set-Content` without `-Encoding` re-encodes non-ASCII text (… — → ✓) and corrupts it.
 
 ## Commands
 ```
@@ -55,8 +59,8 @@ dotnet run --project src/RockPlex.App
 | # | Scope |
 |---|---|
 | M1 | Foundation + pickers (read-only). ✅ done |
-| **M2** | **← next.** Media pipeline: download original part, FLAC conversion (ffmpeg/soxr), tag wipe and rewrite (TagLibSharp), album art (baseline JPEG, embedded + `cover.jpg`) |
-| M3 | Sync engine: device manifest, add/re-tag/remove, `.m3u8` playlists with guarantees, interrupt safety, fit-check gate, `/.rockplex/selection.json` on the iPod |
+| M2 | ✅ implemented, owner verification pending. Media pipeline: download original part, FLAC conversion (ffmpeg/soxr), tag wipe and rewrite (TagLibSharp), album art (baseline JPEG, embedded + `cover.jpg`) |
+| **M3** | **← next.** Sync engine: device manifest, add/re-tag/remove, `.m3u8` playlists with guarantees, interrupt safety, fit-check gate, `/.rockplex/selection.json` on the iPod |
 | M4 | Stats return: Rockbox playback/scrobbler log + database changelog → Plex scrobble/rate |
 | M5 | Polish: tray, auto-sync on plug-in, Last.fm forwarding, optional "appears on" artist scope |
 

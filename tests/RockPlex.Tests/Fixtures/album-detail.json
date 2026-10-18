@@ -1,0 +1,11 @@
+{ "MediaContainer": { "size": 1, "Metadata": [
+  {
+    "ratingKey": "5530", "key": "/library/metadata/5530/children", "guid": "plex://album/5d07c1",
+    "type": "album", "title": "Takk...", "parentRatingKey": "1021", "parentTitle": "Sigur Rós",
+    "studio": "EMI", "year": 2005, "originallyAvailableAt": "2005-09-12", "leafCount": 11,
+    "thumb": "/library/metadata/5530/thumb/1700000001",
+    "Genre": [ { "id": 1, "tag": "Post-Rock" }, { "id": 2, "tag": " Ambient " }, { "id": 3, "tag": "" } ],
+    "Style": [ { "id": 4, "tag": "Dream Pop" } ],
+    "Guid": [ { "id": "mbid://f2f2e4b1-0000-4000-8000-000000000001" } ]
+  }
+] } }

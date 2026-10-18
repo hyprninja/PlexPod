@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using RockPlex.App.Services;
 using RockPlex.App.ViewModels;
 using RockPlex.Device;
+using RockPlex.Media;
 using RockPlex.Plex;
 
 namespace RockPlex.App;
@@ -43,12 +44,16 @@ public partial class App : Application
         });
         services.AddRockPlexPlex();
         services.AddRockPlexDevice();
+        services.AddRockPlexMedia(paths.Cache);
+        services.AddSingleton<IFolderPicker, FolderPicker>();
 
         services.AddSingleton<SignInViewModel>();
         services.AddSingleton<ServerViewModel>();
         services.AddSingleton<DeviceViewModel>();
         services.AddSingleton<SelectionViewModel>();
         services.AddSingleton<SummaryViewModel>();
+        services.AddSingleton<SettingsViewModel>();
+        services.AddSingleton<ExportViewModel>();
         services.AddSingleton<MainViewModel>();
         services.AddSingleton<MainWindow>();
 
@@ -74,7 +79,7 @@ public partial class App : Application
     {
         if (_host is not null)
         {
-            _host.Services.GetRequiredService<MainViewModel>().Dispose();
+            // Stop polling drives first; the container disposes the singletons (MainViewModel included) below.
             _host.Services.GetRequiredService<DeviceWatcher>().DisposeAsync().AsTask().GetAwaiter().GetResult();
             _logger?.LogInformation("RockPlex exiting");
             _host.Dispose();

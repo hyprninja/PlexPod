@@ -68,7 +68,7 @@ public sealed class TrackDetailEnricher(ILogger<TrackDetailEnricher> logger)
                 try
                 {
                     var detail = await client.GetTrackDetailAsync(track.RatingKey, token).ConfigureAwait(false);
-                    if (detail?.Format is { BitDepth: not null, SampleRateHz: not null } format)
+                    if (detail?.Track.Format is { BitDepth: not null, SampleRateHz: not null } format)
                     {
                         _cache[CacheKey(track)] = format;
                         onResolved(track.RatingKey, format);

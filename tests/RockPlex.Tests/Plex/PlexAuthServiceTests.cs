@@ -110,6 +110,41 @@ public sealed class PlexAuthServiceTests
     }
 
     [Fact]
+    public async Task Validate_200WithStalledBody_IsValidWithoutUsername_AndReturnsQuickly()
+    {
+        var fake = new FakeHttpHandler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new StallingStream()) });
+        var options = new PlexClientOptions { ClientIdentifier = "c", UserInfoTimeout = TimeSpan.FromMilliseconds(100) };
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+
+        var result = await Create(fake, options: options).ValidateTokenAsync("tok", CancellationToken.None);
+
+        Assert.Equal(new TokenValidation(TokenStatus.Valid, null), result);
+        Assert.True(timer.Elapsed < TimeSpan.FromSeconds(5), $"took {timer.Elapsed}");
+    }
+
+    /// <summary>A body that never arrives until cancelled, like plex.tv's occasional stall.</summary>
+    private sealed class StallingStream : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => 0; set => throw new NotSupportedException(); }
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+            return 0;
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    [Fact]
     public async Task Validate_401_IsInvalid()
     {
         var result = await Create(new FakeHttpHandler(_ => Status(HttpStatusCode.Unauthorized)))

@@ -12,4 +12,11 @@ public partial class MainWindow : Window
         DataContext = viewModel;
         Loaded += async (_, _) => await viewModel.InitializeAsync();
     }
+
+    private void OnOpenSettings(object sender, RoutedEventArgs e)
+    {
+        var settings = ((MainViewModel)DataContext).Settings;
+        settings.UpdateCacheUsage();
+        new SettingsWindow { Owner = this, DataContext = settings }.ShowDialog();
+    }
 }

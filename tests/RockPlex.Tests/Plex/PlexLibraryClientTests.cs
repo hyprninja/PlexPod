@@ -132,14 +132,97 @@ public sealed class PlexLibraryClientTests
     }
 
     [Fact]
-    public async Task TrackDetail_ReadsBitDepthAndRateFromAudioStream()
+    public async Task TrackDetail_ReadsStreamDetails_AndMusicBrainzId_KeepingTheStringGuid()
     {
         var fake = new FakeHttpHandler(_ => Fixture("track-detail.json"));
-        var track = await Create(fake).GetTrackDetailAsync("48211", CancellationToken.None);
+        var detail = await Create(fake).GetTrackDetailAsync("48211", CancellationToken.None);
 
-        Assert.Equal(24, track!.Format.BitDepth);
-        Assert.Equal(96_000, track.Format.SampleRateHz);
-        Assert.Equal("http://192.168.1.20:32400/library/metadata/48211", Assert.Single(fake.Requests).Uri.ToString());
+        Assert.Equal(24, detail!.Track.Format.BitDepth);
+        Assert.Equal(96_000, detail.Track.Format.SampleRateHz);
+        Assert.Equal("0b5e0d3c-9f3e-4c5a-9c1e-2f4a6b8c0d1e", detail.MusicBrainzTrackId);
+
+        // "guid" (string) and "Guid" (array) sit on the same object; neither may clobber the other.
+        Assert.Equal("plex://track/5d07cdd5", detail.Track.Guid);
+        Assert.Equal("http://192.168.1.20:32400/library/metadata/48211?includeGuids=1", Assert.Single(fake.Requests).Uri.ToString());
+    }
+
+    [Fact]
+    public async Task AlbumDetail_MapsGenresStylesStudioAndDate()
+    {
+        var fake = new FakeHttpHandler(_ => Fixture("album-detail.json"));
+        var album = await Create(fake).GetAlbumDetailAsync("5530", CancellationToken.None);
+
+        Assert.NotNull(album);
+        Assert.Equal("Takk...", album.Title);
+        Assert.Equal("1021", album.ArtistKey);
+        Assert.Equal("Sigur Rós", album.ArtistTitle);
+        Assert.Equal(2005, album.Year);
+        Assert.Equal("2005-09-12", album.OriginallyAvailableAt);
+        Assert.Equal(["Post-Rock", "Ambient"], album.Genres);
+        Assert.Equal(["Dream Pop"], album.Styles);
+        Assert.Equal("EMI", album.Studio);
+        Assert.Equal(11, album.LeafCount);
+        Assert.Equal("/library/metadata/5530/thumb/1700000001", album.ThumbPath);
+        Assert.Equal("http://192.168.1.20:32400/library/metadata/5530", Assert.Single(fake.Requests).Uri.ToString());
+    }
+
+    [Fact]
+    public async Task ArtistDetail_MapsGenres()
+    {
+        var artist = await Create(new FakeHttpHandler(_ => Fixture("artist-detail.json"))).GetArtistDetailAsync("1021", CancellationToken.None);
+        Assert.Equal(new[] { "Rock", "Experimental" }, artist!.Genres);
+    }
+
+    [Fact]
+    public async Task MissingMetadata_ReturnsNull()
+    {
+        var fake = new FakeHttpHandler(_ => Json("""{ "MediaContainer": { "size": 0 } }"""));
+        Assert.Null(await Create(fake).GetAlbumDetailAsync("1", CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Download_WritesExactBytes_TokenInHeaderOnly_WithProgress()
+    {
+        var payload = Enumerable.Range(0, 300_000).Select(i => (byte)(i * 7)).ToArray();
+        var fake = new FakeHttpHandler(_ => new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new ByteArrayContent(payload) });
+        var part = new MediaPartRef(9001, "/library/parts/9001/1700000000/file.flac", payload.Length, "flac");
+        using var destination = new MemoryStream();
+        var progress = new List<long>();
+
+        var written = await Create(fake).DownloadPartAsync(part, destination, new SyncProgress64(progress), CancellationToken.None);
+
+        Assert.Equal(payload.Length, written);
+        Assert.Equal(payload, destination.ToArray());
+        Assert.Equal(payload.Length, progress[^1]);
+        var request = Assert.Single(fake.Requests);
+        Assert.Equal("http://192.168.1.20:32400/library/parts/9001/1700000000/file.flac?download=1", request.Uri.ToString());
+        Assert.Equal(ServerToken, request.Headers["X-Plex-Token"]);
+        Assert.DoesNotContain("SECRET", request.Uri.ToString(), StringComparison.Ordinal);
+        Assert.Equal(HttpMethod.Get, request.Method);
+    }
+
+    [Fact]
+    public async Task Download_SizeMismatch_Throws()
+    {
+        var fake = new FakeHttpHandler(_ => new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new ByteArrayContent(new byte[10]) });
+        var part = new MediaPartRef(1, "/library/parts/1/1/file.flac", 11, "flac");
+        await Assert.ThrowsAsync<PlexProtocolException>(() => Create(fake).DownloadPartAsync(part, new MemoryStream(), null, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Download_UnknownSize_IsAccepted()
+    {
+        var fake = new FakeHttpHandler(_ => new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new ByteArrayContent(new byte[10]) });
+        var part = new MediaPartRef(1, "/library/parts/1/1/file.flac", 0, "flac");
+        Assert.Equal(10, await Create(fake).DownloadPartAsync(part, new MemoryStream(), null, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task DownloadImage_ReturnsBytes()
+    {
+        var fake = new FakeHttpHandler(_ => new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new ByteArrayContent([1, 2, 3]) });
+        Assert.Equal(new byte[] { 1, 2, 3 }, await Create(fake).DownloadImageAsync("/library/metadata/5530/thumb/1", CancellationToken.None));
+        Assert.Equal("http://192.168.1.20:32400/library/metadata/5530/thumb/1", Assert.Single(fake.Requests).Uri.ToString());
     }
 
     [Fact]
@@ -202,6 +285,11 @@ public sealed class PlexLibraryClientTests
         // Second pass hits the cache.
         await enricher.EnrichAsync(Create(fake), tracks, (k, f) => results[k] = f, CancellationToken.None);
         Assert.Single(fake.Requests);
+    }
+
+    private sealed class SyncProgress64(List<long> sink) : IProgress<long>
+    {
+        public void Report(long value) => sink.Add(value);
     }
 
     /// <summary>Synchronous IProgress (Progress&lt;T&gt; posts to the thread pool, which races assertions).</summary>

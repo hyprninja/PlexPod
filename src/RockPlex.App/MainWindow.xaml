@@ -91,7 +91,8 @@
                 <TextBlock Text="Library" VerticalAlignment="Center" Margin="0,0,6,4" />
                 <ComboBox ItemsSource="{Binding Server.Sections}" SelectedItem="{Binding Server.SelectedSection}"
                           DisplayMemberPath="Title" MinWidth="140" Margin="0,0,16,4" AutomationProperties.Name="Library" />
-                <Button Content="⟳ Refresh" Command="{Binding RefreshCommand}" Margin="0,0,0,4" />
+                <Button Content="⟳ Refresh" Command="{Binding RefreshCommand}" Margin="0,0,8,4" />
+                <Button Content="⚙ Settings" Click="OnOpenSettings" Margin="0,0,0,4" />
             </WrapPanel>
 
             <TextBlock Text="{Binding SignIn.Status}" Margin="0,2" TextWrapping="Wrap"
@@ -166,9 +167,23 @@
                 <TextBlock Text="{Binding Summary.WarningText}" TextWrapping="Wrap" Foreground="DarkOrange" VerticalAlignment="Center" />
             </DockPanel>
 
+            <!-- Test export (M2): writes to a PC folder only. -->
+            <DockPanel Margin="0,10,0,0" Visibility="{Binding Export.ProgressText, Converter={StaticResource VisibleWhen}}">
+                <Button DockPanel.Dock="Right" Content="Open folder" Command="{Binding Export.OpenFolderCommand}" Margin="8,0,0,0" />
+                <Button DockPanel.Dock="Right" Content="Cancel" Command="{Binding Export.ExportCancelCommand}" Margin="8,0,0,0"
+                        Visibility="{Binding Export.ExportCommand.IsRunning, Converter={StaticResource VisibleWhen}}" />
+                <StackPanel>
+                    <ProgressBar Height="4" Minimum="0" Maximum="1" Value="{Binding Export.ProgressValue, Mode=OneWay}"
+                                 Visibility="{Binding Export.ExportCommand.IsRunning, Converter={StaticResource VisibleWhen}}" />
+                    <TextBlock Text="{Binding Export.ProgressText}" TextWrapping="Wrap" Margin="0,4,0,0" />
+                </StackPanel>
+            </DockPanel>
+
             <DockPanel Margin="0,10,0,0">
                 <Button DockPanel.Dock="Right" Content="Sync" IsEnabled="False" MinWidth="100"
                         ToolTip="Syncing arrives in a later version. Nothing is written to the iPod yet." />
+                <Button DockPanel.Dock="Right" Content="Test export…" Command="{Binding Export.ExportCommand}" Margin="0,0,8,0"
+                        ToolTip="Process the selection into a folder on this PC (converted, re-tagged, with art) to check before syncing." />
                 <ProgressBar DockPanel.Dock="Left" Width="80" Height="4" IsIndeterminate="True" Margin="0,0,10,0"
                              Visibility="{Binding IsBusy, Converter={StaticResource VisibleWhen}}" />
                 <TextBlock Text="{Binding StatusText}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Opacity="0.8" />

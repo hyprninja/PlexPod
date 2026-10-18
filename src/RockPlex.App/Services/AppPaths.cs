@@ -24,4 +24,7 @@ public sealed class AppPaths
     public string Token => Path.Combine(Root, "token.bin");
 
     public string Logs => Path.Combine(Root, "logs");
+
+    /// <summary>Media pipeline caches (work files, converted audio, album art).</summary>
+    public string Cache => Path.Combine(Root, "cache");
 }

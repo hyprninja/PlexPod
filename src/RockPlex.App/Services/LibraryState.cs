@@ -19,11 +19,15 @@ public sealed class LibraryState
 
     public ConcurrentDictionary<string, AudioFormat> FormatOverrides { get; private set; } = new(StringComparer.Ordinal);
 
+    /// <summary>Real on-device sizes (already-converted files in the cache), keyed by track rating key.</summary>
+    public ConcurrentDictionary<string, long> KnownSizes { get; private set; } = new(StringComparer.Ordinal);
+
     public void Reset(IPlexLibraryClient? client, LibrarySnapshot? snapshot)
     {
         Client = client;
         Snapshot = snapshot;
         PlaylistContents = new(StringComparer.Ordinal);
         FormatOverrides = new(StringComparer.Ordinal);
+        KnownSizes = new(StringComparer.Ordinal);
     }
 }

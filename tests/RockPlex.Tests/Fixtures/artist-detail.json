@@ -1,0 +1,6 @@
+{ "MediaContainer": { "size": 1, "Metadata": [
+  {
+    "ratingKey": "1021", "guid": "plex://artist/5d07b1", "type": "artist", "title": "Sigur Rós",
+    "Genre": [ { "tag": "Rock" }, { "tag": "Experimental" } ]
+  }
+] } }

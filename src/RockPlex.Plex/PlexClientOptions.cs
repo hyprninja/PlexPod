@@ -17,6 +17,9 @@ public sealed class PlexClientOptions
     /// <summary>How often the PIN is polled during sign-in.</summary>
     public TimeSpan PinPollInterval { get; init; } = TimeSpan.FromSeconds(1);
 
+    /// <summary>How long to wait for the plex.tv user body (display name) once the token is known valid.</summary>
+    public TimeSpan UserInfoTimeout { get; init; } = TimeSpan.FromSeconds(5);
+
     /// <summary>Timeout for each <c>/identity</c> connection probe.</summary>
     public TimeSpan ProbeTimeout { get; init; } = TimeSpan.FromSeconds(3);
 

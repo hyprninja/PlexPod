@@ -4,6 +4,7 @@
     "parentRatingKey": "5530", "grandparentRatingKey": "1021", "duration": 268000, "updatedAt": 1700000000,
     "Media": [ { "bitrate": 1950, "audioChannels": 2, "audioCodec": "flac", "container": "flac",
       "Part": [ { "id": 9001, "key": "/library/parts/9001/1700000000/file.flac", "size": 65400000, "container": "flac",
-        "Stream": [ { "id": 1, "streamType": 2, "codec": "flac", "channels": 2, "bitDepth": 24, "samplingRate": 96000, "gain": "-7.2", "peak": "0.98" } ] } ] } ]
+        "Stream": [ { "id": 1, "streamType": 2, "codec": "flac", "channels": 2, "bitDepth": 24, "samplingRate": 96000, "gain": "-7.2", "peak": "0.98" } ] } ] } ],
+    "Guid": [ { "id": "plex://track/5d07cdd5" }, { "id": "mbid://0b5e0d3c-9f3e-4c5a-9c1e-2f4a6b8c0d1e" } ]
   }
 ] } }

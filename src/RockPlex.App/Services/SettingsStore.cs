@@ -2,6 +2,7 @@ using System.IO;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using RockPlex.Core.Models;
+using RockPlex.Core.Tagging;
 
 namespace RockPlex.App.Services;
 
@@ -17,6 +18,14 @@ public sealed record AppSettings
     public string? SectionKey { get; init; }
 
     public SelectionProfile? Selection { get; init; }
+
+    /// <summary>ffmpeg.exe or its folder; empty means "find it" (PATH, then winget).</summary>
+    public string? FfmpegPath { get; init; }
+
+    public int ConversionCacheCapGb { get; init; } = 20;
+
+    /// <summary>Which tag fields are written to the iPod copies (D4).</summary>
+    public TagPolicy TagPolicy { get; init; } = TagPolicy.Default;
 }
 
 /// <summary>

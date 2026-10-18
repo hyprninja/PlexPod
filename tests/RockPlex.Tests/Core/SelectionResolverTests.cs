@@ -157,4 +157,15 @@ public sealed class SelectionResolverTests
         Assert.True(refined.IsEstimateExact);
         Assert.Equal(0, refined.UnknownFormatCount);
     }
+
+    [Fact]
+    public void KnownSizes_WinOverEstimates_AndCountAsExact()
+    {
+        var unknown = Track("t7", "al9", "ar9", 1_000, Flac(null, null));
+        var snapshot = new LibrarySnapshot("3", [Artist("ar9")], [Album("al9", "ar9")], [unknown], []);
+        var result = SelectionResolver.Resolve(snapshot, Profile(artists: [Ref("ar9")]), NoContents, null,
+            new Dictionary<string, long> { ["t7"] = 400 });
+        Assert.Equal(400, result.TotalEstimatedBytes);
+        Assert.True(result.IsEstimateExact);
+    }
 }

@@ -1,7 +1,7 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net10.0-windows</TargetFramework>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 
@@ -20,10 +20,12 @@
     <ProjectReference Include="..\..\src\RockPlex.Core\RockPlex.Core.csproj" />
     <ProjectReference Include="..\..\src\RockPlex.Plex\RockPlex.Plex.csproj" />
     <ProjectReference Include="..\..\src\RockPlex.Device\RockPlex.Device.csproj" />
+    <ProjectReference Include="..\..\src\RockPlex.Media\RockPlex.Media.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <None Include="Fixtures\**\*.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Fixtures\audio\*.*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

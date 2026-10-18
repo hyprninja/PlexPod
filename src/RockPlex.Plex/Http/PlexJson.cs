@@ -7,12 +7,15 @@ namespace RockPlex.Plex.Http;
 
 /// <summary>
 /// Lenient JSON settings for Plex: numbers may arrive as strings and strings (e.g. keys) as numbers;
-/// booleans may arrive as 0/1.
+/// booleans may arrive as 0/1. Property names are matched case-sensitively.
 /// </summary>
 internal static class PlexJson
 {
-    public static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web)
+    // Case-sensitive on purpose: Plex sends both "guid" (string) and "Guid" (array of external IDs)
+    // on the same object. Attributes are camelCase; child arrays (Media, Part, Genre…) are named explicitly.
+    public static readonly JsonSerializerOptions Options = new()
     {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         NumberHandling = JsonNumberHandling.AllowReadingFromString,
         Converters = { new LenientStringConverter(), new LenientBoolConverter() },
     };

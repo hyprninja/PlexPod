@@ -37,7 +37,8 @@ public sealed class SystemDriveSource : IDriveSource
             DriveCandidate? candidate = null;
             try
             {
-                if (drive.IsReady && drive.DriveType is not (DriveType.Network or DriveType.CDRom or DriveType.NoRootDirectory))
+                // Type first: IsReady on a disconnected mapped network drive can block for ~20 s (SMB timeout).
+                if (drive.DriveType is not (DriveType.Network or DriveType.CDRom or DriveType.NoRootDirectory) && drive.IsReady)
                 {
                     candidate = new DriveCandidate(drive.RootDirectory.FullName, drive.VolumeLabel, drive.TotalSize, drive.AvailableFreeSpace);
                 }

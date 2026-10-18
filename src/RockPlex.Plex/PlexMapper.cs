@@ -1,4 +1,5 @@
 using RockPlex.Core.Models;
+using RockPlex.Core.Tagging;
 using RockPlex.Plex.Dto;
 
 namespace RockPlex.Plex;
@@ -88,6 +89,32 @@ internal static class PlexMapper
         var track = string.IsNullOrEmpty(m.RatingKey) ? null : ToTrack(m);
         return new PlaylistEntry(m.PlaylistItemId ?? 0, track, track is null || !track.IsAvailable);
     }
+
+    public static AlbumDetail ToAlbumDetail(MetadataDto m) =>
+        new(
+            Key(m),
+            m.Title ?? string.Empty,
+            m.ParentRatingKey ?? string.Empty,
+            m.ParentTitle ?? string.Empty,
+            m.Year,
+            m.OriginallyAvailableAt,
+            Tags(m.Genres),
+            Tags(m.Styles),
+            m.Studio,
+            m.LeafCount ?? 0,
+            m.Thumb);
+
+    public static ArtistDetail ToArtistDetail(MetadataDto m) =>
+        new(Key(m), m.Title ?? string.Empty, Tags(m.Genres));
+
+    /// <summary>The bare UUID of the first <c>mbid://</c> external ID, if any. ⚠️ Recording vs track MBID is unverified.</summary>
+    public static string? MusicBrainzId(MetadataDto m) =>
+        m.Guids?
+            .Select(g => g.Id)
+            .FirstOrDefault(id => id is not null && id.StartsWith("mbid://", StringComparison.OrdinalIgnoreCase))?[7..];
+
+    private static List<string> Tags(List<TagDto>? tags) =>
+        (tags ?? []).Select(t => t.Tag?.Trim()).Where(t => !string.IsNullOrEmpty(t)).Select(t => t!).ToList();
 
     private static string Key(MetadataDto m) =>
         m.RatingKey ?? throw new Http.PlexProtocolException($"Plex item '{m.Title}' has no ratingKey.");

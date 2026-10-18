@@ -19,11 +19,14 @@ public static class SelectionResolver
     /// playlist missing from here is listed in <see cref="ResolvedSelection.PendingPlaylistKeys"/>
     /// and makes the estimate inexact.</param>
     /// <param name="formatOverrides">Enriched formats keyed by track rating key.</param>
+    /// <param name="knownSizes">Real on-device sizes keyed by track rating key (e.g. an already-converted
+    /// file in the cache). These win over estimates and count as exact.</param>
     public static ResolvedSelection Resolve(
         LibrarySnapshot snapshot,
         SelectionProfile profile,
         IReadOnlyDictionary<string, PlaylistContents> playlistContents,
-        IReadOnlyDictionary<string, AudioFormat>? formatOverrides = null)
+        IReadOnlyDictionary<string, AudioFormat>? formatOverrides = null,
+        IReadOnlyDictionary<string, long>? knownSizes = null)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentNullException.ThrowIfNull(profile);
@@ -119,6 +122,12 @@ public static class SelectionResolver
             var track = chosen[key];
             var format = formatOverrides?.GetValueOrDefault(key) ?? track.Format;
             var estimate = SizeEstimator.EstimateBytes(track, format);
+            if (knownSizes is not null && knownSizes.TryGetValue(key, out var known))
+            {
+                // The format decision still comes from the estimate so the conversion count stays right.
+                estimate = estimate with { Bytes = known, IsExact = true };
+            }
+
             total += estimate.Bytes;
             exact &= estimate.IsExact;
             if (estimate.Decision is FormatDecision.ConvertFlac)

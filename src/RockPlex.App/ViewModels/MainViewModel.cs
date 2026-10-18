@@ -1,3 +1,4 @@
+using System.IO;
 using System.Net.Http;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -6,14 +7,16 @@ using Microsoft.Extensions.Logging;
 using RockPlex.App.Services;
 using RockPlex.Core.Models;
 using RockPlex.Core.Selection;
+using RockPlex.Media.Pipeline;
 using RockPlex.Plex.Library;
 using RockPlex.Plex.Servers;
 
 namespace RockPlex.App.ViewModels;
 
 /// <summary>
-/// Drives the M1 flow: sign-in → servers → connection → music section → library → pickers, with the
-/// capacity bar recalculated (debounced) on every change. Read-only against Plex and the iPod.
+/// Drives the flow: sign-in → servers → connection → music section → library → pickers, with the
+/// capacity bar recalculated (debounced) on every change, plus M2's Test export. Read-only against
+/// Plex, and never writes to the iPod.
 /// </summary>
 public sealed partial class MainViewModel : ObservableObject, IDisposable
 {
@@ -25,6 +28,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private readonly TrackDetailEnricher _enricher;
     private readonly SettingsStore _settings;
     private readonly LibraryState _library;
+    private readonly ConversionCache _conversions;
     private readonly ILogger<MainViewModel> _logger;
     private readonly Debouncer _recalc = new(TimeSpan.FromMilliseconds(150));
     private readonly HashSet<string> _enrichAttempted = new(StringComparer.Ordinal);
@@ -32,6 +36,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private CancellationTokenSource _loadCts = new();
     private CancellationTokenSource? _enrichCts;
     private bool _initialized;
+    private bool _disposed;
 
     public MainViewModel(
         SignInViewModel signIn,
@@ -39,11 +44,14 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         DeviceViewModel device,
         SelectionViewModel selection,
         SummaryViewModel summary,
+        SettingsViewModel settingsView,
+        ExportViewModel export,
         IPlexServerDiscovery discovery,
         IPlexLibraryClientFactory clients,
         TrackDetailEnricher enricher,
         SettingsStore settings,
         LibraryState library,
+        ConversionCache conversions,
         ILogger<MainViewModel> logger)
     {
         SignIn = signIn;
@@ -51,11 +59,14 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         Device = device;
         Selection = selection;
         Summary = summary;
+        Settings = settingsView;
+        Export = export;
         _discovery = discovery;
         _clients = clients;
         _enricher = enricher;
         _settings = settings;
         _library = library;
+        _conversions = conversions;
         _logger = logger;
 
         Server.UrlOverride = settings.Current.ServerUrlOverride ?? string.Empty;
@@ -66,6 +77,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         Server.SectionPicked += async (_, _) => await RunLoadAsync(ct => LoadLibraryAsync(Server.SelectedSection!, ct));
         Selection.Changed += (_, _) => ScheduleRecalc();
         Device.CapacityChanged += (_, _) => ScheduleRecalc();
+        Export.Finished += (_, _) =>
+        {
+            LoadKnownSizes();
+            ScheduleRecalc();
+        };
     }
 
     public SignInViewModel SignIn { get; }
@@ -77,6 +93,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public SelectionViewModel Selection { get; }
 
     public SummaryViewModel Summary { get; }
+
+    public SettingsViewModel Settings { get; }
+
+    public ExportViewModel Export { get; }
 
     [ObservableProperty]
     public partial bool IsBusy { get; private set; }
@@ -94,6 +114,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _initialized = true;
         Device.Start();
         ScheduleRecalc();
+        _ = Settings.DetectAsync();
         await RunLoadAsync(async ct =>
         {
             StatusText = "Checking your Plex sign-in…";
@@ -110,10 +131,18 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     public void Dispose()
     {
+        // The DI container disposes singletons; guard anyway so a second call can never throw on exit.
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
         _loadCts.Cancel();
         _loadCts.Dispose();
+
+        // Only cancelled: the enrichment task may still read its token while it unwinds.
         _enrichCts?.Cancel();
-        _enrichCts?.Dispose();
         _recalc.Dispose();
         Device.Dispose();
     }
@@ -260,6 +289,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
         _library.Reset(client, snapshot);
         _enrichAttempted.Clear();
+        LoadKnownSizes();
         await _settings.UpdateAsync(s => s with { SectionKey = section.Key }, ct);
         Selection.Apply(rows, _settings.Current.Selection, snapshot);
         StatusText = $"{section.Title}: {Format.Count(artists.Count, "artist")}, {Format.Count(albums.Count, "album")}, {Format.Count(tracks.Count, "track")}, {Format.Count(playlists.Count, "playlist")}.";
@@ -342,13 +372,15 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         var profile = Selection.BuildProfile(snapshot.SectionKey);
         var contents = _library.PlaylistContents;
         var overrides = _library.FormatOverrides;
+        var knownSizes = _library.KnownSizes;
 
         Summary.IsCalculating = true;
         try
         {
-            var resolved = await Task.Run(() => SelectionResolver.Resolve(snapshot, profile, contents, overrides), ct);
+            var resolved = await Task.Run(() => SelectionResolver.Resolve(snapshot, profile, contents, overrides, knownSizes), ct);
             ct.ThrowIfCancellationRequested();
             Summary.Update(resolved, CapacityCalculator.Calculate(capacity, resolved), hasDevice);
+            Export.SetSelection(resolved);
 
             if (!SameProfile(_settings.Current.Selection, profile))
             {
@@ -360,6 +392,38 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         finally
         {
             Summary.IsCalculating = false;
+        }
+    }
+
+    /// <summary>
+    /// Real sizes for tracks whose conversion is already cached, plus a small allowance for the tags
+    /// and embedded art written on top (so the bar never underestimates).
+    /// </summary>
+    private void LoadKnownSizes()
+    {
+        const long TagAllowance = 128 * 1024;
+        if (_library.Snapshot is not { } snapshot)
+        {
+            return;
+        }
+
+        IReadOnlyDictionary<string, long> cached;
+        try
+        {
+            cached = _conversions.SizesBySource();
+        }
+        catch (IOException ex)
+        {
+            _logger.LogWarning("Couldn't read the conversion cache: {Message}", ex.Message);
+            return;
+        }
+
+        foreach (var track in snapshot.Tracks.Where(t => t.IsAvailable))
+        {
+            if (cached.TryGetValue(ConversionCache.SourceKey(track.Parts[0].PartId, track.UpdatedAt), out var size))
+            {
+                _library.KnownSizes[track.RatingKey] = size + TagAllowance;
+            }
         }
     }
 
