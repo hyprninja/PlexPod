@@ -18,7 +18,8 @@ public sealed record TrackJob(
     string? MusicBrainzTrackId,
     ArtImages? Art,
     TagPolicy Policy,
-    string OutputPath);
+    string OutputPath,
+    string? FailedSourceFolder = null);
 
 public sealed record ProcessedTrack(
     string OutputPath,
@@ -39,6 +40,7 @@ public sealed class TrackPipeline(
     MediaPaths paths,
     ConversionCache cache,
     FlacConverter converter,
+    ContainerCleaner cleaner,
     AudioVerifier verifier,
     ILogger<TrackPipeline> logger)
 {
@@ -54,10 +56,10 @@ public sealed class TrackPipeline(
         var track = job.Track;
         var part = track.Parts.Count > 0 ? track.Parts[0] : throw new PipelineException("The track has no file on the server.");
         var work = Directory.CreateDirectory(Path.Combine(paths.Work, Guid.NewGuid().ToString("N"))).FullName;
+        var ext = SourceExtension(part);
+        var original = Path.Combine(work, "original" + ext);
         try
         {
-            var ext = SourceExtension(part);
-            var original = Path.Combine(work, "original" + ext);
             await DownloadAsync(client, part, original, ct).ConfigureAwait(false);
 
             var sourceTags = TagWriter.ReadSourceTags(original);
@@ -70,7 +72,14 @@ public sealed class TrackPipeline(
             if (action is FlacAction.Copy)
             {
                 staged = Path.Combine(work, "out" + ext);
-                File.Copy(original, staged);
+                if (ContainerCleaner.NeedsRemux(ext))
+                {
+                    await cleaner.RemuxAsync(ffmpeg, original, staged, ct).ConfigureAwait(false);
+                }
+                else
+                {
+                    File.Copy(original, staged);
+                }
             }
             else
             {
@@ -83,7 +92,7 @@ public sealed class TrackPipeline(
             TagWriteOutcome outcome;
             try
             {
-                outcome = TagWriter.Write(staged, tags, job.Art?.EmbeddedJpeg);
+                outcome = TagWriter.Write(staged, tags, job.Art?.EmbeddedJpeg, TagWriter.ReadGaplessInfo(original));
             }
             catch (Exception ex) when (ex is TagLib.CorruptFileException or TagWriteException or IOException)
             {
@@ -97,6 +106,10 @@ public sealed class TrackPipeline(
             MoveIntoPlace(staged, job.OutputPath);
             var size = new FileInfo(job.OutputPath).Length;
             return new ProcessedTrack(job.OutputPath, Describe(action, info, ext), outcome, tags.ContentHash(), size, fromCache);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && KeepFailedSource(original, job))
+        {
+            throw; // never reached: KeepFailedSource only copies the file and returns false
         }
         catch (VerificationException ex)
         {
@@ -174,6 +187,31 @@ public sealed class TrackPipeline(
             FlacAction.Convert c => verifier.VerifyConversionAsync(ffmpeg, info, converted, c, ct),
             _ => verifier.VerifyLosslessAsync(ffmpeg, original, converted, ct),
         };
+
+    /// <summary>
+    /// Exception filter (runs before the work folder is deleted): keeps the original download of a
+    /// failed track for inspection. Always returns false, so the exception carries on unchanged.
+    /// </summary>
+    private bool KeepFailedSource(string original, TrackJob job)
+    {
+        if (job.FailedSourceFolder is null || !File.Exists(original))
+        {
+            return false;
+        }
+
+        try
+        {
+            Directory.CreateDirectory(job.FailedSourceFolder);
+            var name = DevicePathBuilder.Sanitize($"{job.Track.RatingKey} - {job.Album.ArtistTitle} - {job.Track.Title}", job.Track.RatingKey) + Path.GetExtension(original);
+            File.Copy(original, Path.Combine(job.FailedSourceFolder, name), overwrite: true);
+        }
+        catch (IOException ex)
+        {
+            logger.LogDebug("Couldn't keep failed source: {Message}", ex.Message);
+        }
+
+        return false;
+    }
 
     private static async Task DownloadAsync(IPlexLibraryClient client, MediaPartRef part, string path, CancellationToken ct)
     {

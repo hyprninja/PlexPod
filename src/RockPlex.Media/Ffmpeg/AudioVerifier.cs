@@ -14,19 +14,34 @@ public sealed partial class AudioVerifier(FfmpegRunner runner)
 {
     public static readonly TimeSpan DurationTolerance = TimeSpan.FromMilliseconds(50);
 
-    /// <summary>Copies: the demuxed audio packets must be byte-identical (format-independent).</summary>
+    /// <summary>
+    /// Copies: the audio must be untouched. FLAC compares the decoded samples (plus STREAMINFO MD5),
+    /// because ffmpeg's FLAC parser glues trailing junk such as an ID3v1 tag onto the last packet, so
+    /// removing that tag would look like an audio change. Other formats compare the demuxed packets,
+    /// which their demuxers keep free of tags.
+    /// </summary>
     public async Task VerifyCopyAsync(FfmpegInstall ffmpeg, string source, string output, CancellationToken ct)
     {
-        var before = await PacketMd5Async(ffmpeg, source, ct).ConfigureAwait(false);
-        var after = await PacketMd5Async(ffmpeg, output, ct).ConfigureAwait(false);
-        if (before != after)
+        var src = FlacFile.TryReadStreamInfo(source);
+        var dst = FlacFile.TryReadStreamInfo(output);
+        if (src is not null && dst is not null)
         {
-            throw new VerificationException("The audio changed while re-tagging (packet checksum differs).");
+            if (src.HasAudioMd5 && src.AudioMd5 != dst.AudioMd5)
+            {
+                throw new VerificationException("FLAC STREAMINFO MD5 differs from the source.");
+            }
+
+            if (await DecodedMd5Async(ffmpeg, source, ct).ConfigureAwait(false) != await DecodedMd5Async(ffmpeg, output, ct).ConfigureAwait(false))
+            {
+                throw new VerificationException("The audio changed while re-tagging (decoded checksum differs).");
+            }
+
+            return;
         }
 
-        if (FlacFile.TryReadStreamInfo(source) is { HasAudioMd5: true } src && FlacFile.TryReadStreamInfo(output) is { } dst && src.AudioMd5 != dst.AudioMd5)
+        if (await PacketMd5Async(ffmpeg, source, ct).ConfigureAwait(false) != await PacketMd5Async(ffmpeg, output, ct).ConfigureAwait(false))
         {
-            throw new VerificationException("FLAC STREAMINFO MD5 differs from the source.");
+            throw new VerificationException("The audio changed while re-tagging (packet checksum differs).");
         }
     }
 

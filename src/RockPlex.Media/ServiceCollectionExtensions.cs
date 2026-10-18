@@ -14,6 +14,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<FfmpegRunner>();
         services.AddSingleton<FfmpegLocator>();
         services.AddSingleton<FlacConverter>();
+        services.AddSingleton<ContainerCleaner>();
         services.AddSingleton<AudioVerifier>();
         services.AddSingleton<ConversionCache>();
         services.AddSingleton<AlbumArtProvider>();

@@ -28,6 +28,9 @@ public sealed class TagWriter
     private const string PictureField = "METADATA_BLOCK_PICTURE";
     private const string DashMean = "com.apple.iTunes";
 
+    /// <summary>AAC encoder delay/padding for gapless playback: technical data, not metadata, so it survives the wipe.</summary>
+    public const string GaplessInfoName = "iTunSMPB";
+
     // TagLib's BoxType is internal; the atom name is Latin-1 "©day".
     private static readonly ByteVector DayAtom = ByteVector.FromString("©day", StringType.Latin1);
 
@@ -55,7 +58,22 @@ public sealed class TagWriter
         }
     }
 
-    public static TagWriteOutcome Write(string path, TagSet tags, byte[]? coverJpeg)
+    /// <summary>The MP4 gapless atom (<c>iTunSMPB</c>), if the file has one.</summary>
+    public static string? ReadGaplessInfo(string path)
+    {
+        try
+        {
+            using var file = TagFile.Create(path);
+            return (file.GetTag(TagTypes.Apple, false) as TagLib.Mpeg4.AppleTag)?.GetDashBox(DashMean, GaplessInfoName);
+        }
+        catch (Exception ex) when (ex is UnsupportedFormatException or CorruptFileException or IOException)
+        {
+            return null;
+        }
+    }
+
+    /// <param name="gaplessInfo">MP4 only: an <c>iTunSMPB</c> value to write back after the wipe.</param>
+    public static TagWriteOutcome Write(string path, TagSet tags, byte[]? coverJpeg, string? gaplessInfo = null)
     {
         ArgumentNullException.ThrowIfNull(tags);
         TagFile file;
@@ -99,7 +117,13 @@ public sealed class TagWriter
 
                 case TagLib.Mpeg4.File mp4:
                     mp4.RemoveTags(TagTypes.AllTags);
-                    WriteApple((TagLib.Mpeg4.AppleTag)mp4.GetTag(TagTypes.Apple, true), tags, picture);
+                    var apple = (TagLib.Mpeg4.AppleTag)mp4.GetTag(TagTypes.Apple, true);
+                    WriteApple(apple, tags, picture);
+                    if (!string.IsNullOrWhiteSpace(gaplessInfo))
+                    {
+                        apple.SetDashBox(DashMean, GaplessInfoName, gaplessInfo);
+                    }
+
                     break;
 
                 default:

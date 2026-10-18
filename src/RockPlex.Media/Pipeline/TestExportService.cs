@@ -32,6 +32,9 @@ public sealed class TestExportService(
     ILogger<TestExportService> logger)
 {
     public const string ReportFileName = "RockPlex-export.txt";
+
+    /// <summary>Original downloads of tracks that failed, kept for diagnosis.</summary>
+    public const string FailedFolderName = "_failed-originals";
     public const int TrackConcurrency = 2;
 
     /// <summary>True when <paramref name="folder"/> is on a drive whose root holds <c>.rockbox</c>.</summary>
@@ -99,7 +102,8 @@ public sealed class TestExportService(
             }
 
             exported[track.RatingKey] = devicePath;
-            jobs.Add(new TrackJob(track, ctx.Album, ctx.Artist, ctx.Tracks, null, ctx.Art, request.Policy, ToLocal(request.Folder, devicePath)));
+            jobs.Add(new TrackJob(track, ctx.Album, ctx.Artist, ctx.Tracks, null, ctx.Art, request.Policy, ToLocal(request.Folder, devicePath),
+                Path.Combine(request.Folder, FailedFolderName)));
         }
 
         foreach (var (key, ctx) in albums)
@@ -210,6 +214,10 @@ public sealed class TestExportService(
         builder.AppendLine("Tags written: " + string.Join(", ", TagPolicy.Fields.Where(f => f.Get(request.Policy)).Select(f => f.DisplayName)));
         builder.AppendLine("Tags stripped: " + string.Join(", ", TagPolicy.Fields.Where(f => !f.Get(request.Policy)).Select(f => f.DisplayName)));
         builder.AppendLine("Always written: ROCKPLEX_RATINGKEY, ROCKPLEX_GUID, ROCKPLEX_PARTID");
+        if (failed > 0)
+        {
+            builder.AppendLine($"Originals of failed tracks are in {FailedFolderName}\\ for inspection.");
+        }
         builder.AppendLine();
         foreach (var (_, line) in lines.OrderBy(l => l.Path, StringComparer.Ordinal))
         {

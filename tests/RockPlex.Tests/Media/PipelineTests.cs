@@ -15,6 +15,7 @@ public sealed class PipelineTests : IDisposable
 {
     private readonly TempDir _dir = new();
     private readonly FlacConverter _converter = new(TestFfmpeg.Runner);
+    private readonly ContainerCleaner _cleaner = new(TestFfmpeg.Runner);
     private readonly AudioVerifier _verifier = new(TestFfmpeg.Runner);
 
     public void Dispose() => _dir.Dispose();
@@ -23,7 +24,7 @@ public sealed class PipelineTests : IDisposable
     {
         var paths = new MediaPaths(_dir.File("cache"));
         cache = new ConversionCache(paths);
-        return new TrackPipeline(paths, cache, _converter, _verifier, NullLogger<TrackPipeline>.Instance);
+        return new TrackPipeline(paths, cache, _converter, _cleaner, _verifier, NullLogger<TrackPipeline>.Instance);
     }
 
     private static readonly AlbumDetail Album = new("al1", "Takk...", "ar1", "Sigur Rós", 2005, "2005-09-12", ["Post-Rock"], [], "EMI", 2, "/thumb/1");
@@ -103,6 +104,79 @@ public sealed class PipelineTests : IDisposable
         Assert.Equal(FlacFile.ReadStreamInfo(src).AudioMd5, FlacFile.ReadStreamInfo(output).AudioMd5);
         Assert.Contains(TagWriter.ReadBack(output).Fields, f => f is { Key: "ALBUM", Value: "Takk..." });
         Assert.Empty(Directory.EnumerateFileSystemEntries(_dir.File("cache/work")));
+    }
+
+    [FfmpegFact]
+    public async Task FlacWithTrailingId3v1_IsCopied_WithoutAFalseAudioChangeAlarm()
+    {
+        var ffmpeg = await TestFfmpeg.InstallAsync();
+        var src = await TestFfmpeg.MakeFlacAsync(_dir.File("tagged.flac"), 44_100, 16);
+
+        // A 128-byte ID3v1 tag stuck on the end, as old taggers did.
+        var id3v1 = new byte[128];
+        "TAG"u8.CopyTo(id3v1);
+        "Old Junk Title"u8.CopyTo(id3v1.AsSpan(3));
+        File.WriteAllBytes(src, [.. File.ReadAllBytes(src), .. id3v1]);
+
+        var client = new FakeLibraryClient();
+        client.PartFiles[1] = src;
+        var output = _dir.File("tagged-out.flac");
+
+        var result = await Pipeline(out _).ProcessAsync(client, ffmpeg, Job(Track("t1", 1, "flac"), output), CancellationToken.None);
+
+        Assert.StartsWith("copied", result.Action, StringComparison.Ordinal);
+        Assert.Equal(await _verifier.DecodedMd5Async(ffmpeg, src, CancellationToken.None), await _verifier.DecodedMd5Async(ffmpeg, output, CancellationToken.None));
+        Assert.Equal(TagLib.TagTypes.None, TagWriter.ReadBack(output).ForeignTags);
+    }
+
+    [FfmpegFact]
+    public async Task M4a_IsRebuiltClean_KeepsGaplessInfo_AndAudioPackets()
+    {
+        var ffmpeg = await TestFfmpeg.InstallAsync();
+        var src = _dir.CopyFixture("tone.m4a");
+        using (var file = TagLib.File.Create(src))
+        {
+            var apple = (TagLib.Mpeg4.AppleTag)file.GetTag(TagLib.TagTypes.Apple, true);
+            apple.Title = "Old Title";
+            apple.Year = 1999;
+            apple.Comment = "ripped by junk";
+            apple.SetDashBox("com.apple.iTunes", "iTunSMPB", " 00000000 00000840 000001C0 0000000000003A00");
+            apple.SetDashBox("com.apple.iTunes", "Some Junk", "zzz");
+            file.Save();
+        }
+
+        var client = new FakeLibraryClient();
+        client.PartFiles[5] = src;
+        var output = _dir.File("clean.m4a");
+
+        var result = await Pipeline(out _).ProcessAsync(client, ffmpeg, Job(Track("t5", 5, "m4a", 1, "New Title"), output), CancellationToken.None);
+
+        Assert.Equal("copied (m4a)", result.Action);
+        Assert.Equal(await _verifier.PacketMd5Async(ffmpeg, src, CancellationToken.None), await _verifier.PacketMd5Async(ffmpeg, output, CancellationToken.None));
+        var back = TagWriter.ReadBack(output);
+        Assert.Contains(back.Fields, f => f is { Key: "TITLE", Value: "New Title" });
+        Assert.DoesNotContain(back.Fields, f => f.Value is "Old Title" or "ripped by junk");
+        using var check = TagLib.File.Create(output);
+        var tag = (TagLib.Mpeg4.AppleTag)check.GetTag(TagLib.TagTypes.Apple);
+        Assert.Equal(" 00000000 00000840 000001C0 0000000000003A00", tag.GetDashBox("com.apple.iTunes", "iTunSMPB"));
+        Assert.Null(tag.GetDashBox("com.apple.iTunes", "Some Junk"));
+    }
+
+    [FfmpegFact]
+    public async Task FailedTrack_KeepsItsOriginal_ForInspection()
+    {
+        var ffmpeg = await TestFfmpeg.InstallAsync();
+        var src = _dir.File("broken.flac");
+        File.WriteAllBytes(src, [.. "fLaC"u8, 0x80, 0, 0, 34, .. new byte[34], .. new byte[64]]); // STREAMINFO with rate 0
+        var client = new FakeLibraryClient();
+        client.PartFiles[9] = src;
+        var failed = _dir.File("failed");
+
+        await Assert.ThrowsAsync<PipelineException>(() => Pipeline(out _).ProcessAsync(client, ffmpeg,
+            Job(Track("t9", 9, "flac"), _dir.File("never.flac")) with { FailedSourceFolder = failed }, CancellationToken.None));
+
+        Assert.Single(Directory.GetFiles(failed));
+        Assert.False(File.Exists(_dir.File("never.flac")));
     }
 
     [FfmpegFact]
@@ -213,7 +287,7 @@ public sealed class PipelineTests : IDisposable
 
         var paths = new MediaPaths(_dir.File("cache"));
         var service = new TestExportService(
-            new TrackPipeline(paths, new ConversionCache(paths), _converter, _verifier, NullLogger<TrackPipeline>.Instance),
+            new TrackPipeline(paths, new ConversionCache(paths), _converter, _cleaner, _verifier, NullLogger<TrackPipeline>.Instance),
             new AlbumArtProvider(paths, NullLogger<AlbumArtProvider>.Instance),
             NullLogger<TestExportService>.Instance);
         var folder = _dir.File("export");
@@ -263,7 +337,7 @@ public sealed class PipelineTests : IDisposable
 
         var paths = new MediaPaths(_dir.File("cache"));
         var service = new TestExportService(
-            new TrackPipeline(paths, new ConversionCache(paths), _converter, _verifier, NullLogger<TrackPipeline>.Instance),
+            new TrackPipeline(paths, new ConversionCache(paths), _converter, _cleaner, _verifier, NullLogger<TrackPipeline>.Instance),
             new AlbumArtProvider(paths, NullLogger<AlbumArtProvider>.Instance),
             NullLogger<TestExportService>.Instance);
         await Assert.ThrowsAsync<InvalidOperationException>(() => service.ExportAsync(new FakeLibraryClient(), new FfmpegInstall("x", "1", true),
