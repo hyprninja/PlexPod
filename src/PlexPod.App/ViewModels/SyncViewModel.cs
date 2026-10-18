@@ -109,7 +109,7 @@ public sealed partial class SyncViewModel(
         UpdateDeviceSelectionHint();
     }
 
-    private bool CanSync() => HasSelection && device.SelectedDevice is not null && library.Snapshot is not null && gate.IsFree;
+    private bool CanSync() => HasSelection && device.SelectedDevice is { IsSyncBlocked: false } && library.Snapshot is not null && gate.IsFree;
 
     [RelayCommand(CanExecute = nameof(CanSync), IncludeCancelCommand = true)]
     private async Task SyncAsync(CancellationToken stop)
@@ -140,7 +140,8 @@ public sealed partial class SyncViewModel(
         ProgressValue = 0;
         ProgressText = "Planning the sync (reading the iPod, comparing with Plex)…";
         var request = new SyncRequest(ipod.DriveRoot, ipod.VolumeLabel, ipod.RockboxTarget, client, ffmpeg, snapshot, _selection,
-            library.PlaylistContents, library.FormatOverrides, library.KnownSizes, settings.Policy, _profile, settings.StatsOptions, ipod.Firmware);
+            library.PlaylistContents, library.FormatOverrides, library.KnownSizes, settings.Policy, _profile, settings.StatsOptions, ipod.Firmware,
+            ipod.SignedDatabase);
 
         SyncPreview preview;
         try

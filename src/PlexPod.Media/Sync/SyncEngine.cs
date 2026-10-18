@@ -93,6 +93,12 @@ public sealed class SyncEngine(
         progress?.Report("Comparing with Plex…");
 
         var blockers = new List<string>();
+        if (stock && request.SignedDatabase is { } signed)
+        {
+            // PlexPod's unsigned database would be ignored and the iPod would show an empty library.
+            blockers.Add($"{signed.Message} ({signed.Evidence})");
+        }
+
         var unplayable = new List<string>();
         var targets = BuildTargets(request, unplayable);
         var targetByKey = targets.ToDictionary(t => t.Track.RatingKey, StringComparer.Ordinal);

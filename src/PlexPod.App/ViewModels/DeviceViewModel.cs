@@ -41,13 +41,14 @@ public sealed partial class DeviceViewModel : ObservableObject, IDisposable
     {
         { Firmware: IpodFirmware.Rockbox, IsSupportedTarget: false } d =>
             $"Target \"{d.RockboxTarget ?? "unknown"}\" isn't an iPod Video (ipodvideo); other Rockbox players are untested.",
+        { IsSyncBlocked: true, SignedDatabase: { } signed } => $"{signed.Message} ({signed.Model ?? signed.Evidence})",
         { Firmware: IpodFirmware.Stock } =>
             "Apple firmware: PlexPod writes the iPod Video (5G/5.5G) database. Don't let iTunes sync this iPod, or it will replace PlexPod's library.",
         _ => string.Empty,
     };
 
     private static string Firmware(IpodDevice d) => d.Firmware == IpodFirmware.Stock
-        ? "Apple firmware"
+        ? d.IsSyncBlocked ? "Apple firmware, signed database: not supported" : "Apple firmware"
         : $"Rockbox {d.RockboxTarget ?? "?"} {d.RockboxVersion ?? string.Empty}".TrimEnd();
 
     /// <summary>

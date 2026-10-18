@@ -25,7 +25,8 @@ public sealed record SyncRequest(
     TagPolicy Policy,
     SelectionProfile Profile,
     StatsOptions? Stats = null,
-    IpodFirmware Firmware = IpodFirmware.Rockbox);
+    IpodFirmware Firmware = IpodFirmware.Rockbox,
+    SignedDatabase? SignedDatabase = null);
 
 /// <summary>The read-only look before a sync: what will happen, whether it fits, and anything blocking it.</summary>
 public sealed record SyncPreview(

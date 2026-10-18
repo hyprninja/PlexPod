@@ -216,6 +216,25 @@ public sealed class SyncEngineTests : IDisposable
     }
 
     [FfmpegFact]
+    public async Task Stock_IpodNeedingASignedDatabase_IsBlocked_AndNothingIsWritten()
+    {
+        MakeStock();
+        await LibraryAsync();
+        var signed = new PlexPod.Device.SignedDatabase("iPod Classic", "USB product id 0x1261", NoRockboxPort: false);
+        var request = await RequestAsync(Select(albumA: true, playlist: true), firmware: Stock) with { SignedDatabase = signed };
+
+        var preview = await Engine().PreviewAsync(request, CancellationToken.None);
+        Assert.False(preview.CanStart);
+        Assert.Contains(preview.Blockers, b => b.StartsWith(PlexPod.Device.SignedDatabase.NeedsRockboxMessage, StringComparison.Ordinal));
+        var result = await Engine().ExecuteAsync(preview, null, CancellationToken.None);
+
+        Assert.False(result.Completed);
+        Assert.False(File.Exists(Local(PlexPod.Device.Sync.DevicePaths.ItunesDbPath)));
+        Assert.False(File.Exists(Path.Combine(_ipod, ".plexpod", "manifest.json")));
+        Assert.Equal(0, _client.Downloads);
+    }
+
+    [FfmpegFact]
     public async Task Stock_ResyncWithNoChanges_TouchesNothing()
     {
         MakeStock();

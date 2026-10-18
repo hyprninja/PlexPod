@@ -9,6 +9,7 @@ public static class ServiceCollectionExtensions
     {
         services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<IDriveSource, SystemDriveSource>();
+        services.AddSingleton<IUsbProductSource, RegistryUsbProductSource>();
         services.AddSingleton<IIpodLocator, IpodLocator>();
         services.AddSingleton<DeviceWatcher>();
         return services;

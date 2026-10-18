@@ -62,7 +62,7 @@ Apple's firmware only shows music listed in the iPod's library database. From la
 | iPod nano 3G / 4G, 2007–2008 | ❌ Needs the signed database | ❌ No Rockbox port |
 | iPod nano 5G and later, shuffle, touch | ❌ Newer database formats | ❌ No Rockbox port |
 
-The signature has been worked out (libgpod can write it), so native support for the Classic is possible later. iPods have to be formatted for Windows (FAT32): an iPod formatted on a Mac won't appear in Windows.
+PlexPod recognises those models (from the USB id, the iPod's SysInfo files or the signed database iTunes left on it), lists them and blocks the sync, rather than writing a database the iPod would ignore. The signature has been worked out (libgpod can write it), so native support for the Classic is possible later. iPods have to be formatted for Windows (FAT32): an iPod formatted on a Mac won't appear in Windows.
 
 ## Getting started
 
