@@ -61,10 +61,10 @@ public sealed class TokenScopeTests
         new(new HttpClient(PlexTestSetup.Pipeline(fake)), new PlexServerConnection(new Uri("http://192.168.1.20:32400/"), "t", "m", "S"), options, NullLogger<PlexLibraryClient>.Instance);
 
     [Fact]
-    public async Task DownloadWithUnknownSize_IsCapped()
+    public async Task OversizedDownload_IsCapped()
     {
         var fake = new FakeHttpHandler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(new byte[500]) });
-        var options = new PlexClientOptions { ClientIdentifier = "c", MaxUnknownPartBytes = 100 };
+        var options = new PlexClientOptions { ClientIdentifier = "c", MaxPartBytes = 100 };
         var part = new global::RockPlex.Core.Models.MediaPartRef(1, "/library/parts/1/1/file.flac", 0, "flac");
 
         await Assert.ThrowsAsync<PlexProtocolException>(() => Library(fake, options).DownloadPartAsync(part, new MemoryStream(), null, CancellationToken.None));

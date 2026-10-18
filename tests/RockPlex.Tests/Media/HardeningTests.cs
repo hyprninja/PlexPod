@@ -72,6 +72,40 @@ public sealed class HardeningTests : IDisposable
     }
 
     [Fact]
+    public async Task ArtThatCantBeDecoded_NeverThrows_TheTrackJustHasNoCover()
+    {
+        var paths = new MediaPaths(_dir.File("cache"));
+        var provider = new AlbumArtProvider(paths, NullLogger<AlbumArtProvider>.Instance)
+        {
+            Processor = _ => throw new IOException("Cannot read from the stream."),
+        };
+        var client = new FakeLibraryClient { Image = [1, 2, 3] };
+        var album = new AlbumDetail("1", "We Can't Dance", "ar", "Genesis", 1991, null, [], [], null, 1, "/thumb/1");
+
+        Assert.Null(await provider.GetAsync(client, album, CancellationToken.None));
+    }
+
+    [FfmpegFact]
+    public async Task ArtTheWindowsDecoderRejects_IsRetriedThroughFfmpeg()
+    {
+        var paths = new MediaPaths(_dir.File("cache"));
+        var calls = 0;
+        var provider = new AlbumArtProvider(paths, NullLogger<AlbumArtProvider>.Instance, TestFfmpeg.Runner)
+        {
+            // First attempt (the original bytes) fails as Windows did for the owner's posters; the PNG from ffmpeg works.
+            Processor = bytes => ++calls == 1 ? throw new IOException("Cannot read from the stream.") : ArtProcessor.Process(bytes),
+        };
+        var client = new FakeLibraryClient { Image = TagWriterTests.Jpeg(640, 480) };
+        var album = new AlbumDetail("1", "We Can't Dance", "ar", "Genesis", 1991, null, [], [], null, 1, "/thumb/1");
+
+        var images = await provider.GetAsync(client, album, CancellationToken.None, await TestFfmpeg.InstallAsync());
+
+        Assert.NotNull(images);
+        Assert.Equal(2, calls);
+        Assert.True(ArtProcessor.IsBaselineJpeg(images.CoverJpeg));
+    }
+
+    [Fact]
     public void FfmpegSearch_IgnoresRelativePathEntries()
     {
         var candidates = FfmpegLocator.Candidates(null, @".;bin;""C:\Tools\ffmpeg\bin""").ToList();

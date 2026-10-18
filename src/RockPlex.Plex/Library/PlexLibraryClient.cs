@@ -153,7 +153,8 @@ public sealed class PlexLibraryClient(
             var buffer = new byte[1 << 17];
             long total = 0;
             int read;
-            var limit = part.SizeBytes > 0 ? part.SizeBytes : options.MaxUnknownPartBytes;
+            var expected = response.Content.Headers.ContentLength;
+            var limit = Math.Min(expected ?? long.MaxValue, options.MaxPartBytes);
             while ((read = await source.ReadAsync(buffer, ct).ConfigureAwait(false)) > 0)
             {
                 total += read;
@@ -166,9 +167,18 @@ public sealed class PlexLibraryClient(
                 progress?.Report(total);
             }
 
+            // HTTP framing (Content-Length or chunked encoding) already guarantees a complete transfer; this
+            // makes a short read explicit even if a handler didn't enforce it.
+            if (expected is long length && total != length)
+            {
+                throw new PlexProtocolException($"Download of part {part.PartId} ended early: {total:N0} of {length:N0} bytes.");
+            }
+
+            // Plex's stored size goes stale when a file changes on disk after the last scan (e.g. edited tags).
             if (part.SizeBytes > 0 && total != part.SizeBytes)
             {
-                throw new PlexProtocolException($"Download of part {part.PartId} returned {total:N0} bytes; Plex reported {part.SizeBytes:N0}.");
+                logger.LogInformation("Part {PartId}: received {Total:N0} bytes, Plex's library says {Size:N0} (the file changed since Plex last scanned it)",
+                    part.PartId, total, part.SizeBytes);
             }
 
             return total;

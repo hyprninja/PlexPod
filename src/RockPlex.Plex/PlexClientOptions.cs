@@ -23,8 +23,8 @@ public sealed class PlexClientOptions
     /// <summary>Timeout for each <c>/identity</c> connection probe.</summary>
     public TimeSpan ProbeTimeout { get; init; } = TimeSpan.FromSeconds(3);
 
-    /// <summary>Largest original file accepted when Plex doesn't report its size.</summary>
-    public long MaxUnknownPartBytes { get; init; } = 4L * 1024 * 1024 * 1024;
+    /// <summary>Largest original file accepted, whatever the server announces (FAT32 can't hold 4 GB files anyway).</summary>
+    public long MaxPartBytes { get; init; } = 4L * 1024 * 1024 * 1024;
 
     /// <summary>Largest album poster accepted.</summary>
     public long MaxImageBytes { get; init; } = 50L * 1024 * 1024;

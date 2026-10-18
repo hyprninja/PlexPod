@@ -1004,7 +1004,7 @@ public sealed class SyncEngine(
             {
                 if (!_art.TryGetValue(album.RatingKey, out var images))
                 {
-                    images = await _artProvider.GetAsync(Preview.Request.Client, album, Stop).ConfigureAwait(false);
+                    images = await _artProvider.GetAsync(Preview.Request.Client, album, Stop, Preview.Request.Ffmpeg).ConfigureAwait(false);
                     _art[album.RatingKey] = images;
                 }
 

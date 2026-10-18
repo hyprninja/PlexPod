@@ -83,7 +83,7 @@ public sealed class TestExportService(
             }
 
             var albumTracks = request.Snapshot.TracksByAlbum(albumKey).ToList();
-            var images = await art.GetAsync(client, album, ct).ConfigureAwait(false);
+            var images = await art.GetAsync(client, album, ct, ffmpeg).ConfigureAwait(false);
             albums[albumKey] = new AlbumContext(album, artist, albumTracks, images, albumTracks.Select(t => t.DiscIndex ?? 1).Distinct().Count() > 1);
         }
 

@@ -202,10 +202,24 @@ public sealed class PlexLibraryClientTests
     }
 
     [Fact]
-    public async Task Download_SizeMismatch_Throws()
+    public async Task Download_StalePlexSize_IsAccepted_WhenTheTransferIsComplete()
     {
+        // Plex's library says 11 bytes (stale: the file was edited after the last scan); the server sends 10, completely.
         var fake = new FakeHttpHandler(_ => new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new ByteArrayContent(new byte[10]) });
-        var part = new MediaPartRef(1, "/library/parts/1/1/file.flac", 11, "flac");
+        var part = new MediaPartRef(1, "/library/parts/1/1/file.mp3", 11, "mp3");
+        Assert.Equal(10, await Create(fake).DownloadPartAsync(part, new MemoryStream(), null, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Download_ShortTransfer_Throws()
+    {
+        var fake = new FakeHttpHandler(_ =>
+        {
+            var content = new ByteArrayContent(new byte[10]);
+            content.Headers.ContentLength = 25; // the server promised more than arrived
+            return new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = content };
+        });
+        var part = new MediaPartRef(1, "/library/parts/1/1/file.flac", 0, "flac");
         await Assert.ThrowsAsync<PlexProtocolException>(() => Create(fake).DownloadPartAsync(part, new MemoryStream(), null, CancellationToken.None));
     }
 
