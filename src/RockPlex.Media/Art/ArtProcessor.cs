@@ -17,6 +17,9 @@ public static class ArtProcessor
     public const int CoverSize = 500;
     public const int JpegQuality = 85;
 
+    /// <summary>Largest source side accepted; posters are never this big, and it bounds memory (side² × 3 bytes).</summary>
+    public const int MaxSourceSide = 8000;
+
     public static ArtImages Process(byte[] source)
     {
         ArgumentNullException.ThrowIfNull(source);
@@ -36,12 +39,19 @@ public static class ArtProcessor
             frame = decoder.Frames[0];
         }
 
-        var bgr = new FormatConvertedBitmap(frame, PixelFormats.Bgr24, null, 0);
-        int w = bgr.PixelWidth, h = bgr.PixelHeight;
-        if (w <= 0 || h <= 0)
+        // Check the declared size before converting or allocating anything.
+        if (frame.PixelWidth <= 0 || frame.PixelHeight <= 0)
         {
             throw new InvalidDataException("Album art has no pixels.");
         }
+
+        if (frame.PixelWidth > MaxSourceSide || frame.PixelHeight > MaxSourceSide)
+        {
+            throw new InvalidDataException($"Album art is {frame.PixelWidth}×{frame.PixelHeight}; the limit is {MaxSourceSide} px a side.");
+        }
+
+        var bgr = new FormatConvertedBitmap(frame, PixelFormats.Bgr24, null, 0);
+        int w = bgr.PixelWidth, h = bgr.PixelHeight;
 
         var stride = w * 3;
         var raw = new byte[stride * h];

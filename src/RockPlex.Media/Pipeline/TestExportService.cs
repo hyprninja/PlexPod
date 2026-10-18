@@ -145,7 +145,7 @@ public sealed class TestExportService(
                         + (result.FromCache ? ", conversion from cache" : string.Empty);
                     lines.Enqueue((devicePath, $"OK      {devicePath}  [{result.Action}{notes}]"));
                 }
-                catch (Exception ex) when (ex is PipelineException or HttpRequestException)
+                catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     Interlocked.Increment(ref failed);
                     exported.TryRemove(job.Track.RatingKey, out _);

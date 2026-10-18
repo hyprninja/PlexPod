@@ -10,7 +10,30 @@ public sealed record AdoptionResult(
     IReadOnlyList<ManifestTrack> Tracks,
     IReadOnlyList<ManifestPlaylist> Playlists,
     IReadOnlyList<ManifestExtra> Extras,
-    IReadOnlyList<string> Folders);
+    IReadOnlyList<string> Folders)
+{
+    /// <summary>Files whose tags were read this time and turned out not to be RockPlex's.</summary>
+    public IReadOnlyList<ScannedFile> NotOurs { get; init; } = [];
+
+    public int Checked { get; init; }
+}
+
+/// <summary>A file known not to be RockPlex's, remembered so later plans don't re-read its tags.</summary>
+public sealed record ScannedFile(string DevicePath, long SizeBytes, long ModifiedTicks)
+{
+    public static ScannedFile? Stat(string driveRoot, string devicePath)
+    {
+        try
+        {
+            var info = new FileInfo(DevicePaths.ToLocal(driveRoot, devicePath));
+            return info.Exists ? new ScannedFile(devicePath, info.Length, info.LastWriteTimeUtc.Ticks) : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return null;
+        }
+    }
+}
 
 /// <summary>
 /// Claims files on the iPod that RockPlex demonstrably made but the manifest doesn't list (M3 plan §7,
@@ -28,29 +51,50 @@ public static class Adopter
 
     /// <param name="unownedFiles">Device paths of files under /Music and /Playlists the manifest doesn't list.</param>
     /// <param name="progress">Reports how many files have been looked at.</param>
-    public static AdoptionResult Scan(string driveRoot, IReadOnlyCollection<string> unownedFiles, CancellationToken ct, IProgress<int>? progress = null)
+    /// <param name="knownNotOurs">Files already checked on an earlier plan and unchanged since; their tags aren't re-read.</param>
+    public static AdoptionResult Scan(
+        string driveRoot,
+        IReadOnlyCollection<string> unownedFiles,
+        CancellationToken ct,
+        IProgress<int>? progress = null,
+        Func<string, bool>? knownNotOurs = null)
     {
         ArgumentNullException.ThrowIfNull(unownedFiles);
         var tracks = new List<ManifestTrack>();
         var playlists = new List<ManifestPlaylist>();
+        var notOurs = new List<ScannedFile>();
         var seen = 0;
+        var checkedCount = 0;
         foreach (var devicePath in unownedFiles)
         {
             ct.ThrowIfCancellationRequested();
             progress?.Report(++seen);
-            var ext = Path.GetExtension(devicePath);
-            if (devicePath.StartsWith("/Music/", StringComparison.OrdinalIgnoreCase) && AudioExtensions.Contains(ext))
+            if (!DevicePaths.IsManaged(devicePath) || knownNotOurs?.Invoke(devicePath) == true)
             {
-                if (TryAdoptTrack(driveRoot, devicePath) is { } track)
-                {
-                    tracks.Add(track);
-                }
+                continue;
             }
-            else if (devicePath.StartsWith(SyncPlanner.PlaylistFolder + "/", StringComparison.OrdinalIgnoreCase)
-                && ext.Equals(SyncPlanner.PlaylistExtension, StringComparison.OrdinalIgnoreCase)
-                && TryAdoptPlaylist(driveRoot, devicePath) is { } playlist)
+
+            var ext = Path.GetExtension(devicePath);
+            var isTrack = devicePath.StartsWith("/Music/", StringComparison.OrdinalIgnoreCase) && AudioExtensions.Contains(ext);
+            var isPlaylist = devicePath.StartsWith(SyncPlanner.PlaylistFolder + "/", StringComparison.OrdinalIgnoreCase)
+                && ext.Equals(SyncPlanner.PlaylistExtension, StringComparison.OrdinalIgnoreCase);
+            if (!isTrack && !isPlaylist)
+            {
+                continue;
+            }
+
+            checkedCount++;
+            if (isTrack && TryAdoptTrack(driveRoot, devicePath) is { } track)
+            {
+                tracks.Add(track);
+            }
+            else if (isPlaylist && TryAdoptPlaylist(driveRoot, devicePath) is { } playlist)
             {
                 playlists.Add(playlist);
+            }
+            else if (ScannedFile.Stat(driveRoot, devicePath) is { } stat)
+            {
+                notOurs.Add(stat);
             }
         }
 
@@ -75,7 +119,7 @@ public static class Adopter
             }
         }
 
-        return new AdoptionResult(tracks, playlists, extras, [.. folders]);
+        return new AdoptionResult(tracks, playlists, extras, [.. folders]) { NotOurs = notOurs, Checked = checkedCount };
     }
 
     private static ManifestTrack? TryAdoptTrack(string driveRoot, string devicePath)
@@ -86,8 +130,9 @@ public static class Adopter
         {
             back = TagWriter.ReadBack(local);
         }
-        catch (Exception ex) when (ex is TagLib.UnsupportedFormatException or TagLib.CorruptFileException or IOException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            // Malformed or unreadable files (often the user's own) are simply not RockPlex's.
             return null;
         }
 
@@ -126,7 +171,7 @@ public static class Adopter
             var ratingKey = PlaylistWriter.ReadRatingKey(lines);
             return ratingKey is null ? null : new ManifestPlaylist(ratingKey, devicePath, Path.GetFileNameWithoutExtension(devicePath), "adopted");
         }
-        catch (IOException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or System.Text.DecoderFallbackException)
         {
             return null;
         }

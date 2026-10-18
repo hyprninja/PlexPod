@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using Microsoft.Extensions.Logging.Abstractions;
 using RockPlex.Core.Models;
 using RockPlex.Core.Selection;
@@ -73,7 +74,7 @@ public sealed class SyncEngineTests : IDisposable
             tracks,
             [new PlaylistItem("p1", "g", "Road Trip", false, 4, 0, "/playlists/p1/items")]);
 
-    private SyncEngine Engine(long free = Plenty)
+    private SyncEngine Engine(long free = Plenty, Func<string, string>? fingerprint = null)
     {
         var paths = new MediaPaths(_dir.File("cache"));
         var runner = TestFfmpeg.Runner;
@@ -81,6 +82,7 @@ public sealed class SyncEngineTests : IDisposable
         return new SyncEngine(pipeline, new AlbumArtProvider(paths, NullLogger<AlbumArtProvider>.Instance), paths, new DeviceFileOps(), NullLogger<SyncEngine>.Instance)
         {
             FreeSpace = _ => free,
+            Fingerprint = fingerprint ?? (_ => "test-ipod"),
         };
     }
 
@@ -382,6 +384,159 @@ public sealed class SyncEngineTests : IDisposable
         Assert.StartsWith("#EXTM3U\n#ROCKPLEX ratingKey=p1\n", File.ReadAllText(Local("/Playlists/Road Trip.m3u8")), StringComparison.Ordinal);
         AssertEveryPlaylistResolves(await ManifestAsync());
         AssertUserFilesUntouched();
+    }
+
+
+    // ---------------------------------------------------------------- review fixes (hardening)
+
+    [FfmpegFact]
+    public async Task TamperedManifest_PathsOutsideMusicAndPlaylists_AreNeverTouched()
+    {
+        await LibraryAsync();
+        await SyncAsync(Select());
+        Directory.CreateDirectory(Path.Combine(_ipod, ".rockbox"));
+        File.WriteAllText(Path.Combine(_ipod, ".rockbox", "rockbox.ipod"), "firmware");
+
+        // A manifest edited (or crafted) to claim Rockbox's firmware and a path off the device.
+        var path = Path.Combine(_ipod, ".rockplex", "manifest.json");
+        var json = JsonNode.Parse(File.ReadAllText(path))!;
+        var tracks = json["tracks"]!.AsArray();
+        tracks.Add(new JsonObject { ["devicePath"] = "/.rockbox/rockbox.ipod", ["desiredPath"] = "/.rockbox/rockbox.ipod", ["ratingKey"] = "zz1" });
+        tracks.Add(new JsonObject { ["devicePath"] = "/C:/Windows/win.ini", ["desiredPath"] = "/C:/Windows/win.ini", ["ratingKey"] = "zz2" });
+        json["playlists"]!.AsArray().Add(new JsonObject { ["ratingKey"] = "zz3", ["devicePath"] = "/../evil.m3u8", ["title"] = "x", ["contentHash"] = "h" });
+        File.WriteAllText(path, json.ToJsonString());
+
+        var result = await SyncAsync(Select());
+
+        Assert.True(result.Completed, string.Join("\n", result.Failures));
+        Assert.Equal("firmware", File.ReadAllText(Path.Combine(_ipod, ".rockbox", "rockbox.ipod")));
+        Assert.Contains(result.Warnings, w => w.Contains("pointed outside /Music and /Playlists", StringComparison.Ordinal));
+        Assert.DoesNotContain((await ManifestAsync()).Tracks, t => t.RatingKey.StartsWith("zz", StringComparison.Ordinal));
+        AssertUserFilesUntouched();
+    }
+
+    [FfmpegFact]
+    public async Task FileDeletedByHand_IsCopiedAgain_InsteadOfWedgingEverySync()
+    {
+        await LibraryAsync();
+        await SyncAsync(Select(albumA: true, playlist: true));
+        File.Delete(Local("/Music/Sigur Rós/2005 - Takk/01 Glósóli.flac"));
+
+        var result = await SyncAsync(Select(albumA: true, playlist: true));
+
+        Assert.True(result.Completed, string.Join("\n", result.Failures));
+        Assert.Equal(1, result.Added);
+        Assert.True(File.Exists(Local("/Music/Sigur Rós/2005 - Takk/01 Glósóli.flac")));
+        Assert.Contains(result.Warnings, w => w.Contains("missing from the iPod", StringComparison.Ordinal));
+        AssertEveryPlaylistResolves(await ManifestAsync());
+    }
+
+    [FfmpegFact]
+    public async Task PlexErrorAfterAMove_KeepsTheMoveRecorded_AndTheNextSyncFinishes()
+    {
+        var (a1, a2, b1) = await LibraryAsync();
+        await SyncAsync(Select());
+        SetLibrary([a1 with { Title = "Glósóli (Live)", UpdatedAt = 5 }, a2, b1]);
+        _client.BeforeAlbumDetail = (_, _) => throw new HttpRequestException("Plex went away");
+
+        var failed = await SyncAsync(Select());
+
+        Assert.False(failed.Completed);
+        Assert.Contains(failed.Failures, f => f.Contains("couldn't read its details", StringComparison.Ordinal));
+        Assert.True(File.Exists(Local("/Music/Sigur Rós/2005 - Takk/01 Glósóli (Live).flac")));
+        Assert.Contains((await ManifestAsync()).Tracks, t => t.DevicePath == "/Music/Sigur Rós/2005 - Takk/01 Glósóli (Live).flac");
+
+        _client.BeforeAlbumDetail = null;
+        var retry = await SyncAsync(Select());
+        Assert.True(retry.Completed, string.Join("\n", retry.Failures));
+        Assert.Contains(TagWriter.ReadBack(Local("/Music/Sigur Rós/2005 - Takk/01 Glósóli (Live).flac")).Fields, f => f is { Key: "TITLE", Value: "Glósóli (Live)" });
+    }
+
+    [FfmpegFact]
+    public async Task StopDuringTheTagCheck_IsACleanStop_NotAnError()
+    {
+        var (a1, a2, b1) = await LibraryAsync();
+        await SyncAsync(Select());
+        SetLibrary([a1 with { UpdatedAt = 7 }, a2, b1]);
+        using var stop = new CancellationTokenSource();
+        _client.BeforeAlbumDetail = async (_, ct) =>
+        {
+            await stop.CancelAsync();
+            ct.ThrowIfCancellationRequested();
+        };
+
+        var engine = Engine();
+        var preview = await engine.PreviewAsync(await RequestAsync(Select()), CancellationToken.None);
+        var stopped = await engine.ExecuteAsync(preview, null, stop.Token);
+
+        Assert.True(stopped.Stopped);
+        Assert.False(stopped.Completed);
+        Assert.True(File.Exists(Path.Combine(_ipod, ".rockplex", SyncEngine.ReportFileName)));
+
+        _client.BeforeAlbumDetail = null;
+        Assert.True((await SyncAsync(Select())).Completed);
+    }
+
+    [FfmpegFact]
+    public async Task UnexpectedErrorOnOneTrack_FailsOnlyThatTrack()
+    {
+        await LibraryAsync();
+        _client.ExplodeOnDownload.Add(2);
+
+        var result = await SyncAsync(Select());
+
+        Assert.False(result.Completed);
+        Assert.Equal(1, result.Added);
+        Assert.Contains(result.Failures, f => f.Contains("simulated unexpected failure", StringComparison.Ordinal));
+        Assert.True(File.Exists(Local("/Music/Sigur Rós/2005 - Takk/01 Glósóli.flac")));
+        Assert.Single((await ManifestAsync()).Tracks);
+    }
+
+    [FfmpegFact]
+    public async Task MalformedAudioFileOfTheUsers_DoesNotBreakPlanning()
+    {
+        await LibraryAsync();
+        Directory.CreateDirectory(Local("/Music/User Stuff"));
+        File.WriteAllBytes(Local("/Music/User Stuff/broken.flac"), [.. "fLaC"u8, 0x80, 0, 0, 34, .. new byte[10]]);
+        File.WriteAllBytes(Local("/Music/User Stuff/garbage.m4a"), [0, 0, 0, 8, .. "ftyp"u8, 0xFF, 0xFF, 0xFF, 0xFF]);
+
+        var result = await SyncAsync(Select());
+
+        Assert.True(result.Completed, string.Join("\n", result.Failures));
+        Assert.True(File.Exists(Local("/Music/User Stuff/broken.flac")));
+        Assert.True(File.Exists(Local("/Music/User Stuff/garbage.m4a")));
+    }
+
+    [FfmpegFact]
+    public async Task UnchangedUserFiles_AreNotReReadOnTheNextPlan()
+    {
+        await LibraryAsync();
+        var engine = Engine();
+        var first = await engine.PreviewAsync(await RequestAsync(Select()), CancellationToken.None);
+        Assert.True(first.Adoption.Checked >= 1, "the user's mp3 is checked once");
+        await engine.ExecuteAsync(first, null, CancellationToken.None);
+
+        var second = await engine.PreviewAsync(await RequestAsync(Select()), CancellationToken.None);
+        Assert.Equal(0, second.Adoption.Checked);
+
+        File.WriteAllText(Local("/Music/User Stuff/my own.mp3"), "the user's file, edited");
+        var third = await engine.PreviewAsync(await RequestAsync(Select()), CancellationToken.None);
+        Assert.Equal(1, third.Adoption.Checked);
+    }
+
+    [FfmpegFact]
+    public async Task DifferentDriveBetweenPlanAndSync_IsRefused_BeforeAnythingIsWritten()
+    {
+        await LibraryAsync();
+        var fingerprint = "ipod-A";
+        var engine = Engine(fingerprint: _ => fingerprint);
+        var preview = await engine.PreviewAsync(await RequestAsync(Select()), CancellationToken.None);
+
+        fingerprint = "ipod-B";
+        await Assert.ThrowsAsync<InvalidOperationException>(() => engine.ExecuteAsync(preview, null, CancellationToken.None));
+
+        Assert.False(Directory.Exists(Local("/Music/Sigur Rós")));
+        Assert.Equal(0, _client.Downloads);
     }
 
     private static void CopyTree(string from, string to)

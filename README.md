@@ -35,3 +35,9 @@ dotnet run --project src/RockPlex.App
 - The JSON fixtures in `tests/RockPlex.Tests/Fixtures` are **representative**, not captured. Replace them with real responses (token redacted) when you can.
 - FLAC tracks at or below 1,100 kbps are assumed to be 16/44.1 for the "≈" indicator and are not fetched in detail. Their size estimate is the source size either way, so the fit check stays conservative. M2 must still read real stream details before deciding whether to convert.
 - The fit check keeps 64 MiB free (`CapacityCalculator.ReserveBytes`) for Rockbox's database and playlists.
+
+## Security notes
+- **Plex tokens:** stored with DPAPI (current Windows user), sent only in headers, never in URLs or logs. The **account** token goes only to `https://plex.tv` (and its subdomains); servers only ever receive their own access token, and connection probes send no token at all.
+- **Plain HTTP on the LAN:** if `plex.direct` HTTPS can't be reached (some routers block its DNS), RockPlex falls back to `http://<server-ip>:32400`, and the server's access token then travels unencrypted on your local network. Set the server address in Settings to an `https://` URL to avoid that.
+- **The iPod is untrusted input:** paths in its `/.rockplex/manifest.json` and playlists are validated; RockPlex only ever writes to or deletes from `/Music` and `/Playlists` on the iPod (plus its own `/.rockplex`), and nothing can resolve outside the iPod's drive.
+- **Server data is bounded:** downloads with no reported size are capped (4 GB), album art is capped (50 MB, 8000 px a side), and server values never become file names unhashed.

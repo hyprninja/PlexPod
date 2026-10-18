@@ -24,6 +24,7 @@ public sealed class DeviceFileOps
 
     public async Task<CopyResult> CopyVerifiedAsync(string localSource, string driveRoot, string devicePath, CancellationToken ct)
     {
+        DevicePaths.EnsureManaged(devicePath);
         var final = DevicePaths.ToLocal(driveRoot, devicePath);
         var created = EnsureFolders(driveRoot, devicePath);
         var temp = final + DevicePaths.TempSuffix;
@@ -71,6 +72,7 @@ public sealed class DeviceFileOps
     /// <summary>Writes a small text file (a playlist) the same verified way. UTF-8 without BOM.</summary>
     public async Task<CopyResult> WriteTextVerifiedAsync(string content, string driveRoot, string devicePath, CancellationToken ct)
     {
+        DevicePaths.EnsureManaged(devicePath);
         var final = DevicePaths.ToLocal(driveRoot, devicePath);
         var created = EnsureFolders(driveRoot, devicePath);
         var temp = final + DevicePaths.TempSuffix;
@@ -96,6 +98,8 @@ public sealed class DeviceFileOps
     /// <summary>Renames a RockPlex file on the device (no re-copy). The target must be free.</summary>
     public IReadOnlyList<string> Move(string driveRoot, string fromDevicePath, string toDevicePath)
     {
+        DevicePaths.EnsureManaged(fromDevicePath);
+        DevicePaths.EnsureManaged(toDevicePath);
         var created = EnsureFolders(driveRoot, toDevicePath);
         var from = DevicePaths.ToLocal(driveRoot, fromDevicePath);
         var to = DevicePaths.ToLocal(driveRoot, toDevicePath);
@@ -116,6 +120,7 @@ public sealed class DeviceFileOps
 
     public static void Delete(string driveRoot, string devicePath)
     {
+        DevicePaths.EnsureManaged(devicePath);
         var path = DevicePaths.ToLocal(driveRoot, devicePath);
         if (File.Exists(path))
         {
@@ -127,7 +132,7 @@ public sealed class DeviceFileOps
     public static IReadOnlyList<string> DeleteEmptyFolders(string driveRoot, IEnumerable<string> folders)
     {
         var removed = new List<string>();
-        foreach (var folder in folders.OrderByDescending(f => f.Count(c => c == '/')).ThenBy(f => f, StringComparer.Ordinal))
+        foreach (var folder in folders.Where(DevicePaths.IsManaged).OrderByDescending(f => f.Count(c => c == '/')).ThenBy(f => f, StringComparer.Ordinal))
         {
             var local = DevicePaths.ToLocal(driveRoot, folder);
             try

@@ -69,7 +69,8 @@ public sealed class PlexServerDiscoveryTests
         Assert.Equal("https://192-168-1-20.abc.plex.direct:32400/", connection.BaseUri.ToString());
         Assert.Equal("SECRET-SERVER-TOKEN", connection.AccessToken);
         Assert.DoesNotContain(fake.Requests, r => r.Uri.Host.StartsWith("10-0-0-1", StringComparison.Ordinal));
-        Assert.All(fake.Requests, r => Assert.Equal("SECRET-SERVER-TOKEN", r.Headers["X-Plex-Token"]));
+        // Probes are unauthenticated: no candidate (plain-HTTP or typed) ever sees a token before it is chosen.
+        Assert.All(fake.Requests, r => Assert.False(r.Headers.ContainsKey("X-Plex-Token")));
     }
 
     [Fact]

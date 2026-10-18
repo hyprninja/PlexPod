@@ -21,7 +21,8 @@ public sealed class AlbumArtProvider(MediaPaths paths, ILogger<AlbumArtProvider>
             return null;
         }
 
-        var stem = Path.Combine(paths.ArtCache, $"{album.RatingKey}-{Hash(album.ThumbPath)}");
+        // Only a hash goes into the file name: the rating key comes from the server and is never trusted as a path.
+        var stem = Path.Combine(paths.ArtCache, Hash(album.RatingKey + "|" + album.ThumbPath));
         string embeddedPath = stem + "-embed.jpg", coverPath = stem + "-cover.jpg";
         if (File.Exists(embeddedPath) && File.Exists(coverPath))
         {
@@ -36,7 +37,8 @@ public sealed class AlbumArtProvider(MediaPaths paths, ILogger<AlbumArtProvider>
             await WriteAtomicAsync(coverPath, images.CoverJpeg, ct).ConfigureAwait(false);
             return images;
         }
-        catch (Exception ex) when (ex is HttpRequestException or NotSupportedException or InvalidDataException or FileFormatException or System.Runtime.InteropServices.COMException)
+        catch (Exception ex) when (ex is HttpRequestException or NotSupportedException or InvalidDataException or FileFormatException
+            or System.Runtime.InteropServices.COMException or Plex.Http.PlexProtocolException or ArgumentException or OverflowException)
         {
             // Art is nice to have: a track without art is still synced.
             logger.LogWarning("Album art for {Album} failed: {Message}", album.Title, ex.Message);

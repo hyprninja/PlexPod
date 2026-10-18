@@ -99,9 +99,20 @@ internal sealed class FakeLibraryClient : IPlexLibraryClient
 
     public PlexServerConnection Connection { get; } = new(new Uri("http://fake:32400/"), "t", "m", "Fake");
 
+    /// <summary>Parts whose download throws an unexpected (non-HTTP) exception.</summary>
+    public HashSet<long> ExplodeOnDownload { get; } = [];
+
+    /// <summary>Runs before each album-detail lookup (e.g. to fail it, or to press Stop).</summary>
+    public Func<string, CancellationToken, Task>? BeforeAlbumDetail { get; set; }
+
     public async Task<long> DownloadPartAsync(MediaPartRef part, Stream destination, IProgress<long>? progress, CancellationToken ct)
     {
         Downloads++;
+        if (ExplodeOnDownload.Contains(part.PartId))
+        {
+            throw new InvalidOperationException("simulated unexpected failure");
+        }
+
         var bytes = await System.IO.File.ReadAllBytesAsync(PartFiles[part.PartId], ct);
         await destination.WriteAsync(bytes, ct);
         return bytes.Length;
@@ -110,7 +121,15 @@ internal sealed class FakeLibraryClient : IPlexLibraryClient
     public Task<byte[]> DownloadImageAsync(string imagePath, CancellationToken ct) =>
         Image is null ? throw new HttpRequestException("no image") : Task.FromResult(Image);
 
-    public Task<AlbumDetail?> GetAlbumDetailAsync(string albumKey, CancellationToken ct) => Task.FromResult(Albums.GetValueOrDefault(albumKey));
+    public async Task<AlbumDetail?> GetAlbumDetailAsync(string albumKey, CancellationToken ct)
+    {
+        if (BeforeAlbumDetail is { } hook)
+        {
+            await hook(albumKey, ct);
+        }
+
+        return Albums.GetValueOrDefault(albumKey);
+    }
 
     public Task<ArtistDetail?> GetArtistDetailAsync(string artistKey, CancellationToken ct) => Task.FromResult<ArtistDetail?>(new ArtistDetail(artistKey, "A", ["Rock"]));
 

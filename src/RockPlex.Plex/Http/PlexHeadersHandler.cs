@@ -4,8 +4,8 @@ namespace RockPlex.Plex.Http;
 
 /// <summary>
 /// Adds the <c>X-Plex-*</c> identity headers and <c>Accept: application/json</c> (Plex defaults to XML).
-/// Adds the account token unless the request already carries one (server requests use the server token).
-/// Tokens only ever travel in headers, never in URLs, so logged URLs are clean.
+/// Adds the <b>account</b> token only to requests for plex.tv itself (HTTPS) that don't carry a token;
+/// servers only ever see their own access token. Tokens travel in headers, never in URLs.
 /// </summary>
 public sealed class PlexHeadersHandler(PlexClientOptions options, IPlexTokenProvider tokens) : DelegatingHandler
 {
@@ -24,11 +24,17 @@ public sealed class PlexHeadersHandler(PlexClientOptions options, IPlexTokenProv
             headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         }
 
-        if (!headers.Contains(TokenHeader) && tokens.AccountToken is { Length: > 0 } token)
+        if (!headers.Contains(TokenHeader) && IsPlexTv(request.RequestUri) && tokens.AccountToken is { Length: > 0 } token)
         {
             headers.TryAddWithoutValidation(TokenHeader, token);
         }
 
         return base.SendAsync(request, cancellationToken);
     }
+
+    /// <summary>plex.tv or a subdomain of it, over HTTPS.</summary>
+    internal static bool IsPlexTv(Uri? uri) =>
+        uri is { IsAbsoluteUri: true }
+        && uri.Scheme == Uri.UriSchemeHttps
+        && (uri.Host.Equals("plex.tv", StringComparison.OrdinalIgnoreCase) || uri.Host.EndsWith(".plex.tv", StringComparison.OrdinalIgnoreCase));
 }

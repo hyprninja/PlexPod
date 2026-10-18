@@ -153,10 +153,16 @@ public sealed class PlexLibraryClient(
             var buffer = new byte[1 << 17];
             long total = 0;
             int read;
+            var limit = part.SizeBytes > 0 ? part.SizeBytes : options.MaxUnknownPartBytes;
             while ((read = await source.ReadAsync(buffer, ct).ConfigureAwait(false)) > 0)
             {
-                await destination.WriteAsync(buffer.AsMemory(0, read), ct).ConfigureAwait(false);
                 total += read;
+                if (total > limit)
+                {
+                    throw new PlexProtocolException($"Download of part {part.PartId} exceeded {limit:N0} bytes.");
+                }
+
+                await destination.WriteAsync(buffer.AsMemory(0, read), ct).ConfigureAwait(false);
                 progress?.Report(total);
             }
 
@@ -175,9 +181,31 @@ public sealed class PlexLibraryClient(
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(MetadataTimeout);
         using var request = CreateRequest(imagePath, string.Empty);
-        using var response = await http.SendAsync(request, timeout.Token).ConfigureAwait(false);
+        using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
-        return await response.Content.ReadAsByteArrayAsync(timeout.Token).ConfigureAwait(false);
+        if (response.Content.Headers.ContentLength > options.MaxImageBytes)
+        {
+            throw new PlexProtocolException($"Image is larger than {options.MaxImageBytes:N0} bytes.");
+        }
+
+        using var buffer = new MemoryStream();
+        var source = await response.Content.ReadAsStreamAsync(timeout.Token).ConfigureAwait(false);
+        await using (source.ConfigureAwait(false))
+        {
+            var chunk = new byte[1 << 16];
+            int read;
+            while ((read = await source.ReadAsync(chunk, timeout.Token).ConfigureAwait(false)) > 0)
+            {
+                if (buffer.Length + read > options.MaxImageBytes)
+                {
+                    throw new PlexProtocolException($"Image is larger than {options.MaxImageBytes:N0} bytes.");
+                }
+
+                buffer.Write(chunk, 0, read);
+            }
+        }
+
+        return buffer.ToArray();
     }
 
     private async Task<MetadataDto?> GetMetadataAsync(string ratingKey, string query, CancellationToken ct)

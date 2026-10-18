@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text;
@@ -32,11 +33,15 @@ public sealed class SyncEngine(
     public const string CoverFileName = "cover.jpg";
     public const string SelectionFileName = "selection.json";
     public const string ReportFileName = "last-sync.txt";
+    public const string NotOursFileName = "not-ours.json";
 
     private const int ProducerConcurrency = 2;
 
     /// <summary>Free space on the device; replaceable in tests to exercise the fit gate and make-room mode.</summary>
     internal Func<string, long> FreeSpace { get; init; } = DeviceFileOps.FreeBytes;
+
+    /// <summary>Identifies the volume, so a different iPod plugged in between plan and sync is caught.</summary>
+    internal Func<string, string> Fingerprint { get; init; } = DefaultFingerprint;
     private const int SaveEveryFiles = 20;
     private static readonly TimeSpan SaveEvery = TimeSpan.FromSeconds(60);
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
@@ -51,14 +56,32 @@ public sealed class SyncEngine(
         var store = new DeviceStore(root);
         var identity = await store.TryReadIdentityAsync(ct).ConfigureAwait(false);
         var (loaded, source) = await store.LoadManifestAsync(ct).ConfigureAwait(false);
-        var manifest = loaded ?? DeviceManifest.Empty(identity?.DeviceId ?? string.Empty);
+        var notes = new List<string>();
+        var manifest = Sanitize(loaded ?? DeviceManifest.Empty(identity?.DeviceId ?? string.Empty), notes);
 
         progress?.Report("Listing files on the iPod…");
         var listing = await Task.Run(() => DeviceFileOps.ListFiles(root, "Music", "Playlists"), ct).ConfigureAwait(false);
+        manifest = Reconcile(manifest, listing, notes);
         var owned = OwnedPaths(manifest);
         var unowned = listing.Where(f => !owned.Contains(f)).ToList();
+
+        // Files checked on an earlier plan and unchanged since (same size and time) aren't re-read.
+        var known = await LoadNotOursAsync(store, ct).ConfigureAwait(false);
+        var stillNotOurs = new List<ScannedFile>();
+        bool KnownNotOurs(string path)
+        {
+            if (known.TryGetValue(path, out var previous) && ScannedFile.Stat(root, path) is { } now
+                && now.SizeBytes == previous.SizeBytes && now.ModifiedTicks == previous.ModifiedTicks)
+            {
+                stillNotOurs.Add(now);
+                return true;
+            }
+
+            return false;
+        }
+
         var scanned = new Progress<int>(n => progress?.Report($"Checking files RockPlex doesn't know yet: {n:N0} of {unowned.Count:N0}…"));
-        var adoption = await Task.Run(() => Adopter.Scan(root, unowned, ct, scanned), ct).ConfigureAwait(false);
+        var adoption = await Task.Run(() => Adopter.Scan(root, unowned, ct, scanned, KnownNotOurs), ct).ConfigureAwait(false);
         progress?.Report("Comparing with Plex…");
 
         var blockers = new List<string>();
@@ -108,7 +131,12 @@ public sealed class SyncEngine(
             blockers.Add($"The selection doesn't fit: {Mb(fit.OverBy)} MB over, even after removals.");
         }
 
-        return new SyncPreview(request, identity, manifest, source, adoption, plan, fit, blockers);
+        return new SyncPreview(request, identity, manifest, source, adoption, plan, fit, blockers)
+        {
+            Notes = notes,
+            DeviceFingerprint = Fingerprint(root),
+            NotOurs = [.. stillNotOurs, .. adoption.NotOurs],
+        };
     }
 
     // ---------------------------------------------------------------- execute
@@ -165,6 +193,33 @@ public sealed class SyncEngine(
             logger.LogWarning(ex, "Device disappeared during sync");
             return run.Finish(completed: false, logger);
         }
+        catch (OperationCanceledException) when (stop.IsCancellationRequested)
+        {
+            run.Stopped = true;
+            run.Warnings.Add("Stopped. The iPod is consistent; sync again to finish.");
+            return await SalvageAsync(run).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && run.Started)
+        {
+            logger.LogError(ex, "Sync failed");
+            run.Failures.Add($"The sync stopped because of an error: {ex.Message} Everything finished so far is recorded; sync again to continue.");
+            return await SalvageAsync(run).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>After a stop or an error: record everything already done on the device, then report.</summary>
+    private async Task<SyncResult> SalvageAsync(Run run)
+    {
+        try
+        {
+            return await CommitAsync(run, completed: false).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            logger.LogWarning(ex, "Couldn't save the manifest after a stopped sync");
+            run.Failures.Add("Couldn't save RockPlex's records on the iPod; the next sync will repair them from the files' own tags.");
+            return run.Finish(completed: false, logger);
+        }
     }
 
     private async Task PreflightAsync(Run run)
@@ -177,7 +232,14 @@ public sealed class SyncEngine(
             throw new InvalidOperationException("A different iPod is connected than the one that was planned for. Plan the sync again.");
         }
 
+        if (run.Preview.DeviceFingerprint.Length > 0 && Fingerprint(request.DriveRoot) != run.Preview.DeviceFingerprint)
+        {
+            throw new InvalidOperationException("A different iPod (or drive) is connected than the one that was planned for. Plan the sync again.");
+        }
+
         run.State.DeviceId = identity.DeviceId;
+        run.Warnings.AddRange(run.Preview.Notes);
+        run.Started = true;
         var cleaned = DeviceFileOps.CleanTempFiles(request.DriveRoot);
         if (cleaned > 0)
         {
@@ -239,6 +301,11 @@ public sealed class SyncEngine(
             done++;
             await run.SaveIfDueAsync().ConfigureAwait(false);
         }
+
+        if (moves.Count > 0)
+        {
+            await run.SaveAsync().ConfigureAwait(false);
+        }
     }
 
     private async Task TracksAsync(Run run)
@@ -260,9 +327,21 @@ public sealed class SyncEngine(
 
             run.Report("Checking tags", checkedCount++, candidates.Count, op.Target.Track.Title);
             var existing = run.State.Tracks[op.DevicePath];
-            var album = await run.AlbumAsync(op.Target.Track.AlbumKey).ConfigureAwait(false);
-            var artist = await run.ArtistForGenreAsync(album).ConfigureAwait(false);
-            var mbid = request.Policy.MusicBrainzTrackId ? await run.MbidAsync(op.Target.Track.RatingKey).ConfigureAwait(false) : null;
+            AlbumDetail album;
+            ArtistDetail? artist;
+            string? mbid;
+            try
+            {
+                album = await run.AlbumAsync(op.Target.Track.AlbumKey).ConfigureAwait(false);
+                artist = await run.ArtistForGenreAsync(album).ConfigureAwait(false);
+                mbid = request.Policy.MusicBrainzTrackId ? await run.MbidAsync(op.Target.Track.RatingKey).ConfigureAwait(false) : null;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                run.Fail(op, $"couldn't read its details from Plex ({ex.Message})");
+                continue;
+            }
+
             var expected = TagMapper.Map(
                 new TagSource(op.Target.Track, album, artist, request.Snapshot.TracksByAlbum(op.Target.Track.AlbumKey).ToList(), mbid, new SourceTags(existing.SourceComposer, existing.SourceComment)),
                 request.Policy).ContentHash();
@@ -302,9 +381,9 @@ public sealed class SyncEngine(
                             var processed = await ProduceAsync(run, op, staging, token).ConfigureAwait(false);
                             await channel.Writer.WriteAsync((op, processed), token).ConfigureAwait(false);
                         }
-                        catch (Exception ex) when (ex is PipelineException or HttpRequestException or Plex.Http.PlexProtocolException
-                            or IOException && Directory.Exists(run.Root))
+                        catch (Exception ex) when (ex is not OperationCanceledException)
                         {
+                            // Producing happens on the PC (download, convert, tag), so one track's problem never stops the rest.
                             run.Fail(op, ex.Message);
                         }
                     }).ConfigureAwait(false);
@@ -336,7 +415,8 @@ public sealed class SyncEngine(
                     done++;
                     await run.SaveIfDueAsync().ConfigureAwait(false);
                 }
-                catch (DeviceVerifyException ex)
+                catch (Exception ex) when (ex is DeviceVerifyException
+                    || (ex is IOException or UnauthorizedAccessException && Directory.Exists(run.Root)))
                 {
                     run.Fail(op, ex.Message);
                 }
@@ -611,6 +691,7 @@ public sealed class SyncEngine(
         run.Report("Finishing", 0, 0, string.Empty);
         await run.SaveAsync().ConfigureAwait(false);
         await run.Store.WriteTextAsync(SelectionFileName, JsonSerializer.Serialize(run.Preview.Request.Profile, Json), CancellationToken.None).ConfigureAwait(false);
+        await run.Store.WriteTextAsync(NotOursFileName, JsonSerializer.Serialize(run.Preview.NotOurs, Json), CancellationToken.None).ConfigureAwait(false);
         var result = run.Finish(completed, logger);
         await run.Store.WriteTextAsync(ReportFileName, result.Report, CancellationToken.None).ConfigureAwait(false);
         return result;
@@ -672,6 +753,73 @@ public sealed class SyncEngine(
         ?? snapshot.FindAlbum(track.AlbumKey)?.ArtistTitle
         ?? snapshot.FindArtist(track.ArtistKey)?.Title
         ?? "Unknown Artist";
+
+    /// <summary>
+    /// The manifest is read from the iPod, so it is untrusted: entries outside /Music and /Playlists
+    /// (or malformed) are dropped, never acted on.
+    /// </summary>
+    internal static DeviceManifest Sanitize(DeviceManifest manifest, List<string> notes)
+    {
+        var tracks = manifest.Tracks.Where(t => DevicePaths.IsManaged(t.DevicePath) && DevicePaths.IsManaged(t.DesiredPath)).ToList();
+        var playlists = manifest.Playlists.Where(p => DevicePaths.IsManaged(p.DevicePath)).ToList();
+        var extras = manifest.Extras.Where(e => DevicePaths.IsManaged(e.DevicePath)).ToList();
+        var folders = manifest.Folders.Where(DevicePaths.IsManaged).ToList();
+        var dropped = manifest.Tracks.Count - tracks.Count + manifest.Playlists.Count - playlists.Count + manifest.Extras.Count - extras.Count;
+        if (dropped > 0)
+        {
+            notes.Add($"Ignored {dropped} entr{(dropped == 1 ? "y" : "ies")} in RockPlex's records that pointed outside /Music and /Playlists.");
+        }
+
+        return manifest with { Tracks = tracks, Playlists = playlists, Extras = extras, Folders = folders };
+    }
+
+    /// <summary>
+    /// Drops manifest entries whose files are gone (deleted by hand, or lost to an interrupted sync),
+    /// so they are planned again instead of wedging every later sync.
+    /// </summary>
+    internal static DeviceManifest Reconcile(DeviceManifest manifest, IReadOnlyCollection<string> listing, List<string> notes)
+    {
+        var present = listing.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var tracks = manifest.Tracks.Where(t => present.Contains(t.DevicePath)).ToList();
+        var playlists = manifest.Playlists.Where(p => present.Contains(p.DevicePath)).ToList();
+        var extras = manifest.Extras.Where(e => present.Contains(e.DevicePath)).ToList();
+        var missing = manifest.Tracks.Count - tracks.Count + manifest.Playlists.Count - playlists.Count;
+        if (missing > 0)
+        {
+            notes.Add($"{missing} file(s) RockPlex had copied were missing from the iPod; they will be copied again if still selected.");
+        }
+
+        return manifest with { Tracks = tracks, Playlists = playlists, Extras = extras };
+    }
+
+    private static async Task<Dictionary<string, ScannedFile>> LoadNotOursAsync(DeviceStore store, CancellationToken ct)
+    {
+        try
+        {
+            var json = await store.TryReadTextAsync(NotOursFileName, ct).ConfigureAwait(false);
+            var list = json is null ? null : JsonSerializer.Deserialize<List<ScannedFile>>(json, Json);
+            return (list ?? []).Where(f => DevicePaths.IsManaged(f.DevicePath))
+                .GroupBy(f => f.DevicePath, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+        }
+        catch (JsonException)
+        {
+            return new Dictionary<string, ScannedFile>(StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    private static string DefaultFingerprint(string root)
+    {
+        try
+        {
+            var drive = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(root))!);
+            return FormattableString.Invariant($"{drive.VolumeLabel}|{drive.TotalSize}|{drive.DriveFormat}");
+        }
+        catch (Exception ex) when (ex is IOException or ArgumentException or UnauthorizedAccessException)
+        {
+            return string.Empty;
+        }
+    }
 
     private static HashSet<string> OwnedPaths(DeviceManifest manifest) =>
         manifest.Tracks.Select(t => t.DevicePath)
@@ -735,7 +883,11 @@ public sealed class SyncEngine(
 
         public HashSet<string> AlbumsTouched { get; } = new(StringComparer.Ordinal);
 
-        public Dictionary<string, string?> Mbids { get; } = new(StringComparer.Ordinal);
+        /// <summary>Written by producer threads, read by the device writer: must be thread-safe.</summary>
+        public ConcurrentDictionary<string, string?> Mbids { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>Set once preflight passed; from then on, any failure saves the manifest before reporting.</summary>
+        public bool Started { get; set; }
 
         public bool Stopped { get; set; }
 
@@ -832,11 +984,7 @@ public sealed class SyncEngine(
         public async Task<string?> MbidAsync(string ratingKey)
         {
             var detail = await Preview.Request.Client.GetTrackDetailAsync(ratingKey, Stop).ConfigureAwait(false);
-            lock (Mbids)
-            {
-                Mbids[ratingKey] = detail?.MusicBrainzTrackId;
-            }
-
+            Mbids[ratingKey] = detail?.MusicBrainzTrackId;
             return detail?.MusicBrainzTrackId;
         }
 

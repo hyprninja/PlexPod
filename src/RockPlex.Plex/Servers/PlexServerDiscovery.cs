@@ -107,7 +107,7 @@ public sealed class PlexServerDiscovery(
 
         // Probe all at once, then take the best-ranked success.
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        var probes = candidates.Select(uri => ProbeAsync(uri, server.AccessToken, cts.Token)).ToList();
+        var probes = candidates.Select(uri => ProbeAsync(uri, cts.Token)).ToList();
         for (var i = 0; i < candidates.Count; i++)
         {
             if (await probes[i].ConfigureAwait(false))
@@ -123,18 +123,15 @@ public sealed class PlexServerDiscovery(
         return null;
     }
 
-    private async Task<bool> ProbeAsync(Uri baseUri, string token, CancellationToken ct)
+    /// <summary>Unauthenticated <c>GET /identity</c>: no token is sent to a candidate before it is chosen.</summary>
+    private async Task<bool> ProbeAsync(Uri baseUri, CancellationToken ct)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(options.ProbeTimeout);
         try
         {
             var http = httpFactory.CreateClient(PlexLibraryClient.HttpClientName);
-            using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(baseUri, "identity"));
-            if (token.Length > 0)
-            {
-                request.Headers.TryAddWithoutValidation(PlexHeadersHandler.TokenHeader, token);
-            }
+            using var request = new HttpRequestMessage(HttpMethod.Get, PlexLibraryClient.Combine(baseUri, "/identity"));
 
             using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false);
             logger.LogDebug("Probe {Uri} → {Status}", baseUri, (int)response.StatusCode);

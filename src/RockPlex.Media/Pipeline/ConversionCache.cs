@@ -1,16 +1,19 @@
 using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using RockPlex.Core.Media;
 
 namespace RockPlex.Media.Pipeline;
 
 /// <summary>
-/// Converted (untagged) audio keyed by part id + Plex <c>updatedAt</c> + conversion profile, with
-/// least-recently-used eviction above the size cap. Copies are never cached.
+/// Converted (untagged) audio keyed by the source file (part id + part key, which embeds the file's
+/// change stamp) + conversion profile, with least-recently-used eviction above the size cap. Editing
+/// metadata in Plex never invalidates a conversion. Copies are never cached.
 /// </summary>
 public sealed class ConversionCache(MediaPaths paths)
 {
     /// <summary>Bump when the ffmpeg commands change, so old outputs aren't reused.</summary>
-    public const int ProfileVersion = 1;
+    public const int ProfileVersion = 2;
 
     public const long DefaultCapBytes = 20L * 1024 * 1024 * 1024;
 
@@ -18,10 +21,10 @@ public sealed class ConversionCache(MediaPaths paths)
 
     public long CapBytes { get; set; } = DefaultCapBytes;
 
-    public static string Key(long partId, long? updatedAt, FlacAction action) => action switch
+    public static string Key(long partId, string partKey, FlacAction action) => action switch
     {
-        FlacAction.Convert c => string.Create(CultureInfo.InvariantCulture, $"{partId}-{updatedAt ?? 0}-v{ProfileVersion}-{c.TargetBits}x{c.TargetRateHz}"),
-        FlacAction.ReencodeLossless => string.Create(CultureInfo.InvariantCulture, $"{partId}-{updatedAt ?? 0}-v{ProfileVersion}-lossless"),
+        FlacAction.Convert c => string.Create(CultureInfo.InvariantCulture, $"{SourceKey(partId, partKey)}-v{ProfileVersion}-{c.TargetBits}x{c.TargetRateHz}"),
+        FlacAction.ReencodeLossless => string.Create(CultureInfo.InvariantCulture, $"{SourceKey(partId, partKey)}-v{ProfileVersion}-lossless"),
         _ => throw new ArgumentException("Copies aren't cached.", nameof(action)),
     };
 
@@ -45,7 +48,16 @@ public sealed class ConversionCache(MediaPaths paths)
         var path = PathFor(key);
         lock (_gate)
         {
-            File.Move(finishedFile, path, overwrite: true);
+            if (File.Exists(path))
+            {
+                // Produced meanwhile by another export or sync; keep that copy, which may be in use.
+                File.Delete(finishedFile);
+            }
+            else
+            {
+                File.Move(finishedFile, path);
+            }
+
             File.SetLastAccessTimeUtc(path, DateTime.UtcNow);
             Evict(keep: path);
         }
@@ -55,8 +67,9 @@ public sealed class ConversionCache(MediaPaths paths)
 
     public long SizeBytes() => new DirectoryInfo(paths.Converted).EnumerateFiles("*.flac").Sum(f => f.Length);
 
-    public static string SourceKey(long partId, long? updatedAt) =>
-        string.Create(CultureInfo.InvariantCulture, $"{partId}-{updatedAt ?? 0}");
+    /// <summary>Part id + a short hash of the part key (file-name safe; the key changes when the file does).</summary>
+    public static string SourceKey(long partId, string partKey) =>
+        string.Create(CultureInfo.InvariantCulture, $"{partId}-{Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(partKey ?? string.Empty)))[..12]}");
 
     /// <summary>
     /// Sizes of cached conversions for the current profile, keyed by <see cref="SourceKey"/>, so the

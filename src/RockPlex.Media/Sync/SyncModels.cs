@@ -34,6 +34,15 @@ public sealed record SyncPreview(
     FitResult Fit,
     IReadOnlyList<string> Blockers)
 {
+    /// <summary>Things noticed while planning (repaired manifest entries, ignored unsafe paths).</summary>
+    public IReadOnlyList<string> Notes { get; init; } = [];
+
+    /// <summary>Volume label, size and file system seen while planning; checked again before writing.</summary>
+    public string DeviceFingerprint { get; init; } = string.Empty;
+
+    /// <summary>Files known not to be RockPlex's, saved to the iPod so the next plan can skip their tags.</summary>
+    public IReadOnlyList<ScannedFile> NotOurs { get; init; } = [];
+
     public bool CanStart => Blockers.Count == 0 && Fit.Outcome != FitOutcome.TooBig;
 
     public bool UsesMakeRoom => Fit.Outcome == FitOutcome.FitsAfterRemovals;

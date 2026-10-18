@@ -10,6 +10,7 @@ using RockPlex.Core.Models;
 using RockPlex.Core.Selection;
 using RockPlex.Core.Sync;
 using RockPlex.Device.Sync;
+using RockPlex.Media;
 using RockPlex.Media.Sync;
 
 namespace RockPlex.App.ViewModels;
@@ -30,6 +31,7 @@ public sealed partial class SyncViewModel(
     SettingsViewModel settings,
     DeviceViewModel device,
     ISyncConfirmation confirmation,
+    OperationGate gate,
     ILogger<SyncViewModel> logger) : ObservableObject
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -101,7 +103,7 @@ public sealed partial class SyncViewModel(
         UpdateDeviceSelectionHint();
     }
 
-    private bool CanSync() => HasSelection && device.SelectedDevice is not null && library.Snapshot is not null;
+    private bool CanSync() => HasSelection && device.SelectedDevice is not null && library.Snapshot is not null && gate.IsFree;
 
     [RelayCommand(CanExecute = nameof(CanSync), IncludeCancelCommand = true)]
     private async Task SyncAsync(CancellationToken stop)
@@ -122,6 +124,13 @@ public sealed partial class SyncViewModel(
             return;
         }
 
+        using var lease = gate.TryEnter("Sync");
+        if (lease is null)
+        {
+            ProgressText = $"Wait for the {gate.Holder?.ToLowerInvariant()} to finish first.";
+            return;
+        }
+
         ProgressValue = 0;
         ProgressText = "Planning the sync (reading the iPod, comparing with Plex)…";
         var request = new SyncRequest(ipod.DriveRoot, ipod.VolumeLabel, ipod.RockboxTarget, client, ffmpeg, snapshot, _selection,
@@ -133,8 +142,14 @@ public sealed partial class SyncViewModel(
             var planning = new Progress<string>(message => ProgressText = message);
             preview = await Task.Run(() => engine.PreviewAsync(request, stop, planning), stop);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or HttpRequestException)
+        catch (OperationCanceledException) when (stop.IsCancellationRequested)
         {
+            ProgressText = "Planning cancelled; nothing was changed.";
+            return;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "Sync planning failed");
             ProgressText = $"Couldn't plan the sync: {ex.Message}";
             return;
         }

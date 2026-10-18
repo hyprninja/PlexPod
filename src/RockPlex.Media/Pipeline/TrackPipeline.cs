@@ -84,7 +84,7 @@ public sealed class TrackPipeline(
             }
             else
             {
-                (untaggedReference, fromCache) = await ConvertAsync(ffmpeg, original, info!, part, track.UpdatedAt, action, ct).ConfigureAwait(false);
+                (untaggedReference, fromCache) = await ConvertAsync(ffmpeg, original, info!, part, action, ct).ConfigureAwait(false);
                 staged = Path.Combine(work, "out.flac");
                 File.Copy(untaggedReference, staged);
             }
@@ -150,9 +150,9 @@ public sealed class TrackPipeline(
         $"{bits}/{(rate % 1000 == 0 ? (rate / 1000).ToString(System.Globalization.CultureInfo.InvariantCulture) : (rate / 1000.0).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture))}";
 
     private async Task<(string Path, bool FromCache)> ConvertAsync(
-        FfmpegInstall ffmpeg, string original, FlacStreamInfo info, MediaPartRef part, long? updatedAt, FlacAction action, CancellationToken ct)
+        FfmpegInstall ffmpeg, string original, FlacStreamInfo info, MediaPartRef part, FlacAction action, CancellationToken ct)
     {
-        var key = ConversionCache.Key(part.PartId, updatedAt, action);
+        var key = ConversionCache.Key(part.PartId, part.Key, action);
         var fromCache = cache.TryGet(key, out var cached);
         if (!fromCache)
         {

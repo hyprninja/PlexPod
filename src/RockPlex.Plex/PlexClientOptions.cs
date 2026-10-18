@@ -23,6 +23,12 @@ public sealed class PlexClientOptions
     /// <summary>Timeout for each <c>/identity</c> connection probe.</summary>
     public TimeSpan ProbeTimeout { get; init; } = TimeSpan.FromSeconds(3);
 
+    /// <summary>Largest original file accepted when Plex doesn't report its size.</summary>
+    public long MaxUnknownPartBytes { get; init; } = 4L * 1024 * 1024 * 1024;
+
+    /// <summary>Largest album poster accepted.</summary>
+    public long MaxImageBytes { get; init; } = 50L * 1024 * 1024;
+
     /// <summary>Page size for <c>X-Plex-Container-Size</c>.</summary>
     public int PageSize { get; init; } = 1000;
 }

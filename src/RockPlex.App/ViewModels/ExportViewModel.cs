@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using RockPlex.App.Services;
 using RockPlex.Core.Models;
 using RockPlex.Core.Selection;
+using RockPlex.Media;
 using RockPlex.Media.Pipeline;
 
 namespace RockPlex.App.ViewModels;
@@ -34,6 +35,7 @@ public sealed partial class ExportViewModel(
     LibraryState library,
     SettingsViewModel settings,
     IFolderPicker folders,
+    OperationGate gate,
     ILogger<ExportViewModel> logger) : ObservableObject
 {
     private ResolvedSelection _selection = ResolvedSelection.Empty;
@@ -61,7 +63,7 @@ public sealed partial class ExportViewModel(
         HasSelection = selection.TrackCount > 0;
     }
 
-    private bool CanExport() => HasSelection;
+    private bool CanExport() => HasSelection && gate.IsFree;
 
     [RelayCommand(CanExecute = nameof(CanExport), IncludeCancelCommand = true)]
     private async Task ExportAsync(CancellationToken ct)
@@ -82,6 +84,13 @@ public sealed partial class ExportViewModel(
             }
 
             ffmpeg = settings.Ffmpeg;
+        }
+
+        using var lease = gate.TryEnter("Test export");
+        if (lease is null)
+        {
+            ProgressText = $"Wait for the {gate.Holder?.ToLowerInvariant()} to finish first.";
+            return;
         }
 
         var folder = folders.PickFolder("Choose a folder on this PC for the test export");

@@ -24,6 +24,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<TestExportService>();
         services.AddSingleton<DeviceFileOps>();
         services.AddSingleton<SyncEngine>();
+        services.AddSingleton<OperationGate>();
         return services;
     }
 }

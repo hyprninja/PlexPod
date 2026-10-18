@@ -47,6 +47,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         SettingsViewModel settingsView,
         ExportViewModel export,
         SyncViewModel sync,
+        RockPlex.Media.OperationGate gate,
         IPlexServerDiscovery discovery,
         IPlexLibraryClientFactory clients,
         TrackDetailEnricher enricher,
@@ -63,6 +64,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         Settings = settingsView;
         Export = export;
         Sync = sync;
+        gate.Changed += (_, _) => Application.Current?.Dispatcher.BeginInvoke(() =>
+        {
+            Export.ExportCommand.NotifyCanExecuteChanged();
+            Sync.SyncCommand.NotifyCanExecuteChanged();
+        });
         _discovery = discovery;
         _clients = clients;
         _enricher = enricher;
@@ -447,7 +453,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
         foreach (var track in snapshot.Tracks.Where(t => t.IsAvailable))
         {
-            if (cached.TryGetValue(ConversionCache.SourceKey(track.Parts[0].PartId, track.UpdatedAt), out var size))
+            if (cached.TryGetValue(ConversionCache.SourceKey(track.Parts[0].PartId, track.Parts[0].Key), out var size))
             {
                 _library.KnownSizes[track.RatingKey] = size + TagAllowance;
             }

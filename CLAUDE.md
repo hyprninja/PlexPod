@@ -2,7 +2,7 @@
 
 RockPlex is a **Windows desktop app (.NET 10, WPF, Fluent theme)** that syncs a **Plex Media Server music library** to an **iPod 5.5G (Video) 80 GB running Rockbox**. Plex is the source of truth. The iPod should show exactly what Plex shows.
 
-**Status (18 Oct 2026):** M1 and M2 are done and verified by the owner on the real library and iPod. **Milestone 3 (sync engine) is implemented** (`docs/M3-plan.md`, owner decisions D5–D7 in its §10): it builds clean and all 241 tests pass, including end-to-end syncs against a temp-folder iPod (removals, make-room, Stop, failed tracks, lost-manifest rebuild, test-export adoption). **Not yet checked by the owner:** a real sync to the iPod (acceptance criteria 2–6). The Plex JSON fixtures are still representative, not captured. Next: verify M3, then M4 (stats return).
+**Status (18 Oct 2026):** M1 and M2 are done and verified by the owner on the real library and iPod. **Milestone 3 (sync engine) is implemented** (`docs/M3-plan.md`, owner decisions D5–D7 in its §10): it builds clean and all 284 tests pass (after a full bug/security review on 18 Oct), including end-to-end syncs against a temp-folder iPod (removals, make-room, Stop, failed tracks, lost-manifest rebuild, test-export adoption). **Not yet checked by the owner:** a real sync to the iPod (acceptance criteria 2–6). The Plex JSON fixtures are still representative, not captured. Next: verify M3, then M4 (stats return).
 
 ## Read these first
 | File | What's in it |
@@ -34,7 +34,8 @@ Status markers in those docs: ✅ verified from a primary source · ⚠️ infer
 - **Only touch iPod files listed in RockPlex's manifest.** The user's own files and playlists on the iPod are never modified or deleted.
 - **Device tags = wipe everything, then write one clean set from Plex.** Rockbox's parser is *first value wins* for text fields, so patching in place is unsafe.
 - **The fit check is conservative**: when a format is unknown, assume the larger size; never underestimate.
-- **Plex tokens are stored only with DPAPI (CurrentUser)**, never in plaintext and never logged.
+- **Plex tokens are stored only with DPAPI (CurrentUser)**, never in plaintext and never logged. The account token is attached only to `https://*.plex.tv`; servers get only their own token; connection probes are unauthenticated.
+- **Everything read from the iPod is untrusted** (manifest, playlists, selection): device paths go through `DevicePaths` (no drive letters, backslashes, `.`/`..`, must resolve inside the drive), and RockPlex only mutates `/Music` and `/Playlists`. The planner reconciles the manifest with the files actually present before acting.
 - `RockPlex.Core` has **no package dependencies** and no I/O.
 - **Device tags follow `TagPolicy`** (D4): every field can be stripped; only the `ROCKPLEX_*` ID tags are always written. Folder names come from Plex values, never from the (possibly stripped) tags.
 - **Device writes go through `DeviceFileOps` only**: temp file → flush → unbuffered read-back SHA-256 → rename. Deletes only for paths in the manifest; stale playlists are removed before tracks, and a track any RockPlex playlist on the iPod still names is never deleted.

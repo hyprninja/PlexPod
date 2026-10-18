@@ -48,6 +48,12 @@ public sealed class PlaylistVerifier
             return "not an absolute /Music path";
         }
 
+        // Lines come from a file on the iPod: never follow "..", drive letters or backslashes off the device.
+        if (!DevicePaths.IsWellFormed(devicePath))
+        {
+            return "not a valid device path";
+        }
+
         var segments = devicePath.Trim('/').Split('/');
         var current = driveRoot;
         for (var i = 0; i < segments.Length; i++)

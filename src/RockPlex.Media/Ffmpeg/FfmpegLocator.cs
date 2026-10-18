@@ -58,7 +58,10 @@ public sealed partial class FfmpegLocator(FfmpegRunner runner, ILogger<FfmpegLoc
         }
     }
 
-    internal static IEnumerable<string> Candidates(string? configuredPath)
+    internal static IEnumerable<string> Candidates(string? configuredPath) =>
+        Candidates(configuredPath, Environment.GetEnvironmentVariable("PATH"));
+
+    internal static IEnumerable<string> Candidates(string? configuredPath, string? pathVariable)
     {
         if (!string.IsNullOrWhiteSpace(configuredPath))
         {
@@ -66,9 +69,14 @@ public sealed partial class FfmpegLocator(FfmpegRunner runner, ILogger<FfmpegLoc
             yield return Directory.Exists(trimmed) ? System.IO.Path.Combine(trimmed, ExecutableName) : trimmed;
         }
 
-        foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? string.Empty).Split(System.IO.Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        foreach (var entry in (pathVariable ?? string.Empty).Split(System.IO.Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
         {
-            yield return System.IO.Path.Combine(dir.Trim().Trim('"'), ExecutableName);
+            // Relative entries (".", "bin") would run whatever ffmpeg.exe sits in the current folder.
+            var dir = entry.Trim().Trim('"');
+            if (System.IO.Path.IsPathFullyQualified(dir))
+            {
+                yield return System.IO.Path.Combine(dir, ExecutableName);
+            }
         }
 
         var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
