@@ -2,9 +2,9 @@
 
 # PlexPod
 
-**Your Plex music library on an iPod Video, exactly as Plex shows it, on Apple's own firmware or Rockbox.**
+**Your Plex music library on a classic iPod, exactly as Plex shows it, on Apple's own firmware or Rockbox.**
 
-PlexPod is a Windows app that syncs music from a Plex Media Server to an iPod 5.5G (Video). Plug the iPod in and PlexPod works out what it runs: **Apple's stock firmware** (so it keeps working with your car and other iPod accessories) or **[Rockbox](https://www.rockbox.org)**. Pick playlists, artists and albums (or everything), press **Sync**, and the iPod ends up with the same titles, artists, album art and playlists you see in Plex. Each sync only changes what's different, and plays and ratings from the iPod flow back to Plex.
+PlexPod is a Windows app that syncs music from a Plex Media Server to an iPod. Plug the iPod in and PlexPod works out what it runs: **Apple's stock firmware** (so it keeps working with your car and other iPod accessories) or **[Rockbox](https://www.rockbox.org)**. It was built and tested on an **iPod 5.5G (Video)**; see [Which iPods work](#which-ipods-work) for the rest. Pick playlists, artists and albums (or everything), press **Sync**, and the iPod ends up with the same titles, artists, album art and playlists you see in Plex. Each sync only changes what's different, and plays and ratings from the iPod flow back to Plex.
 
 ![PlexPod syncing playlists to an iPod](docs/images/plexpod-sync.png)
 
@@ -14,8 +14,6 @@ PlexPod is a Windows app that syncs music from a Plex Media Server to an iPod 5.
 - **Apple's firmware (iPod OS 1.3):** PlexPod writes the iPod's own library database, the way iTunes did, so artists, albums, playlists and covers show in the iPod's menus and in **car stereos and docks** that talk to iPods. No iTunes needed.
 - **Rockbox:** music in plain artist/album folders with `.m3u8` playlists, for Rockbox's database and file browser.
 - PlexPod tells them apart by what's on the iPod and runs the matching sync. Switch firmware and the next sync tidies up what it wrote for the other one.
-
-> Apple-firmware support and play-count return are new and still being tested on real hardware.
 
 ### Choose what goes on the iPod
 - **All songs**, or any mix of **playlists**, **artists** and **albums**. Ticking an album and its artist costs nothing extra; every track is stored once.
@@ -51,12 +49,28 @@ PlexPod is a Windows app that syncs music from a Plex Media Server to an iPod 5.
 - **Fast repeat syncs:** unchanged tracks are skipped, a Plex edit only rewrites the tags it affects, and converted files are cached on the PC.
 - **Test export** writes the processed files to a folder on your PC, if you want to see the results before syncing.
 
+## Which iPods work
+
+PlexPod was built and tested on an **iPod 5.5G (Video)**, with both Apple's firmware and Rockbox.
+
+Apple's firmware only shows music listed in the iPod's library database. From late 2007, Apple's firmware requires that database to carry a cryptographic signature ("hash58", tied to each iPod). PlexPod doesn't create that signature, so on those models it needs Rockbox, which reads the music folders directly.
+
+| iPod | Apple firmware | Rockbox |
+|---|---|---|
+| **iPod 5G / 5.5G (Video)**, 2005–2006 | ✅ Built and tested here (iPod OS 1.3) | ✅ Built and tested here |
+| iPod 1G–4G, Photo/Color, mini 1G/2G, nano 1G/2G, 2001–2006 | Should work: no signature needed. Untested, and covers use the iPod Video's thumbnail sizes, so they may not show | Should work wherever Rockbox runs (untested) |
+| **iPod Classic 6G / 6.5G / 7G** (80, 120, 160 GB), 2007–2009 | ❌ Needs the signed database | ✅ Use Rockbox, which runs on the Classic (untested with PlexPod) |
+| iPod nano 3G / 4G, 2007–2008 | ❌ Needs the signed database | ❌ No Rockbox port |
+| iPod nano 5G and later, shuffle, touch | ❌ Newer database formats | ❌ No Rockbox port |
+
+The signature has been worked out (libgpod can write it), so native support for the Classic is possible later. iPods have to be formatted for Windows (FAT32): an iPod formatted on a Mac won't appear in Windows.
+
 ## Getting started
 
 **You'll need**
 - Windows 10 or 11, and the [.NET 10 SDK](https://dotnet.microsoft.com/download) to build it (there's no installer yet)
 - A Plex Media Server with a music library
-- An iPod 5.5G (Video) running Apple's firmware or Rockbox, connected in disk mode
+- An iPod that works with PlexPod (see [Which iPods work](#which-ipods-work)), connected in disk mode
 - **ffmpeg** with soxr: `winget install Gyan.FFmpeg`. PlexPod finds it automatically.
 
 **Run it**
@@ -84,6 +98,8 @@ dotnet run --project src/PlexPod.App
 - [x] Sync engine with verified copies and unbreakable playlists
 - [x] Play counts and ratings from the iPod back to Plex
 - [x] Apple's stock firmware alongside Rockbox, detected automatically
+- [ ] Covers on older iPods' Apple firmware (their thumbnail sizes)
+- [ ] Apple's firmware on the iPod Classic (the signed "hash58" database)
 - [ ] Tray icon, automatic sync when the iPod is plugged in, Last.fm scrobbling
 
 ## Privacy and security
