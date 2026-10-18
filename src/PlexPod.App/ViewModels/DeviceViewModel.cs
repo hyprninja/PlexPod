@@ -7,7 +7,7 @@ using PlexPod.Device;
 
 namespace PlexPod.App.ViewModels;
 
-/// <summary>The connected Rockbox player(s). Read-only: M1 never writes to the device.</summary>
+/// <summary>The connected iPod(s), Rockbox or stock firmware. Read-only: detection never writes to the device.</summary>
 public sealed partial class DeviceViewModel : ObservableObject, IDisposable
 {
     private readonly DeviceWatcher _watcher;
@@ -23,23 +23,32 @@ public sealed partial class DeviceViewModel : ObservableObject, IDisposable
     /// <summary>Raised on the UI thread whenever the selected device or its free space changes.</summary>
     public event EventHandler? CapacityChanged;
 
-    public ObservableCollection<RockboxDevice> Devices { get; } = [];
+    public ObservableCollection<IpodDevice> Devices { get; } = [];
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(DescriptionText), nameof(WarningText), nameof(HasDevice))]
-    public partial RockboxDevice? SelectedDevice { get; set; }
+    public partial IpodDevice? SelectedDevice { get; set; }
 
     public bool HasDevice => SelectedDevice is not null;
 
     public DeviceCapacity? Capacity => SelectedDevice?.Capacity;
 
     public string DescriptionText => SelectedDevice is { } d
-        ? $"iPod: {d.DriveRoot.TrimEnd('\\')} \"{d.VolumeLabel}\" · Rockbox {d.RockboxTarget ?? "?"} {d.RockboxVersion ?? string.Empty} · {Format.Bytes(d.FreeBytes)} free of {Format.Bytes(d.TotalBytes)}"
-        : "No Rockbox iPod connected. Plug it in (disk mode) and it will appear here.";
+        ? $"iPod: {d.DriveRoot.TrimEnd('\\')} \"{d.VolumeLabel}\" · {Firmware(d)} · {Format.Bytes(d.FreeBytes)} free of {Format.Bytes(d.TotalBytes)}"
+        : "No iPod connected. Plug it in (disk mode) and it will appear here.";
 
-    public string WarningText => SelectedDevice is { IsSupportedTarget: false } d
-        ? $"Target \"{d.RockboxTarget ?? "unknown"}\" isn't an iPod Video (ipodvideo); other Rockbox players are untested."
-        : string.Empty;
+    public string WarningText => SelectedDevice switch
+    {
+        { Firmware: IpodFirmware.Rockbox, IsSupportedTarget: false } d =>
+            $"Target \"{d.RockboxTarget ?? "unknown"}\" isn't an iPod Video (ipodvideo); other Rockbox players are untested.",
+        { Firmware: IpodFirmware.Stock } =>
+            "Apple firmware: PlexPod writes the iPod Video (5G/5.5G) database. Don't let iTunes sync this iPod, or it will replace PlexPod's library.",
+        _ => string.Empty,
+    };
+
+    private static string Firmware(IpodDevice d) => d.Firmware == IpodFirmware.Stock
+        ? "Apple firmware"
+        : $"Rockbox {d.RockboxTarget ?? "?"} {d.RockboxVersion ?? string.Empty}".TrimEnd();
 
     /// <summary>
     /// The watcher's first scan runs straight away on a background thread. Scanning on the UI thread
@@ -54,9 +63,9 @@ public sealed partial class DeviceViewModel : ObservableObject, IDisposable
         _watcher.DeviceChanged -= OnWatcherEvent;
     }
 
-    partial void OnSelectedDeviceChanged(RockboxDevice? value) => CapacityChanged?.Invoke(this, EventArgs.Empty);
+    partial void OnSelectedDeviceChanged(IpodDevice? value) => CapacityChanged?.Invoke(this, EventArgs.Empty);
 
-    private void OnWatcherEvent(object? sender, RockboxDeviceEventArgs e) =>
+    private void OnWatcherEvent(object? sender, IpodDeviceEventArgs e) =>
         Application.Current?.Dispatcher.BeginInvoke(Sync);
 
     private void Sync()

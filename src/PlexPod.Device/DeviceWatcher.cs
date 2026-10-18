@@ -1,8 +1,8 @@
 namespace PlexPod.Device;
 
-public sealed class RockboxDeviceEventArgs(RockboxDevice device) : EventArgs
+public sealed class IpodDeviceEventArgs(IpodDevice device) : EventArgs
 {
-    public RockboxDevice Device { get; } = device;
+    public IpodDevice Device { get; } = device;
 }
 
 /// <summary>
@@ -10,24 +10,24 @@ public sealed class RockboxDeviceEventArgs(RockboxDevice device) : EventArgs
 /// <see cref="DeviceChanged"/> fires when a known device's free space or info changes.
 /// Events are raised on a thread-pool thread.
 /// </summary>
-public sealed class DeviceWatcher(IRockboxDeviceLocator locator, TimeProvider time) : IAsyncDisposable
+public sealed class DeviceWatcher(IIpodLocator locator, TimeProvider time) : IAsyncDisposable
 {
     public static readonly TimeSpan DefaultInterval = TimeSpan.FromSeconds(2);
 
     private readonly Lock _gate = new();
-    private Dictionary<string, RockboxDevice> _devices = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, IpodDevice> _devices = new(StringComparer.OrdinalIgnoreCase);
     private CancellationTokenSource? _cts;
     private Task? _loop;
 
-    public event EventHandler<RockboxDeviceEventArgs>? DeviceArrived;
+    public event EventHandler<IpodDeviceEventArgs>? DeviceArrived;
 
-    public event EventHandler<RockboxDeviceEventArgs>? DeviceRemoved;
+    public event EventHandler<IpodDeviceEventArgs>? DeviceRemoved;
 
-    public event EventHandler<RockboxDeviceEventArgs>? DeviceChanged;
+    public event EventHandler<IpodDeviceEventArgs>? DeviceChanged;
 
     public TimeSpan Interval { get; init; } = DefaultInterval;
 
-    public IReadOnlyList<RockboxDevice> Devices
+    public IReadOnlyList<IpodDevice> Devices
     {
         get
         {
@@ -60,7 +60,7 @@ public sealed class DeviceWatcher(IRockboxDeviceLocator locator, TimeProvider ti
     public void Poll()
     {
         var found = locator.FindDevices().ToDictionary(d => d.DriveRoot, StringComparer.OrdinalIgnoreCase);
-        Dictionary<string, RockboxDevice> previous;
+        Dictionary<string, IpodDevice> previous;
         lock (_gate)
         {
             previous = _devices;
@@ -71,7 +71,7 @@ public sealed class DeviceWatcher(IRockboxDeviceLocator locator, TimeProvider ti
         {
             if (!found.ContainsKey(root))
             {
-                DeviceRemoved?.Invoke(this, new RockboxDeviceEventArgs(device));
+                DeviceRemoved?.Invoke(this, new IpodDeviceEventArgs(device));
             }
         }
 
@@ -79,11 +79,11 @@ public sealed class DeviceWatcher(IRockboxDeviceLocator locator, TimeProvider ti
         {
             if (!previous.TryGetValue(root, out var old))
             {
-                DeviceArrived?.Invoke(this, new RockboxDeviceEventArgs(device));
+                DeviceArrived?.Invoke(this, new IpodDeviceEventArgs(device));
             }
             else if (old != device)
             {
-                DeviceChanged?.Invoke(this, new RockboxDeviceEventArgs(device));
+                DeviceChanged?.Invoke(this, new IpodDeviceEventArgs(device));
             }
         }
     }

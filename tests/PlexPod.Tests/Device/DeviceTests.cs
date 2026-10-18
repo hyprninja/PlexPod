@@ -11,10 +11,16 @@ public sealed class DeviceTests : IDisposable
 
     public void Dispose() => Directory.Delete(_root, recursive: true);
 
-    private string FakeDrive(string name, bool rockbox, string? info = null)
+    private string FakeDrive(string name, bool rockbox, string? info = null, bool stock = false)
     {
         var path = Path.Combine(_root, name);
         Directory.CreateDirectory(path);
+        if (stock)
+        {
+            Directory.CreateDirectory(Path.Combine(path, "iPod_Control", "iTunes"));
+            Directory.CreateDirectory(Path.Combine(path, "iPod_Control", "Device"));
+        }
+
         if (rockbox)
         {
             Directory.CreateDirectory(Path.Combine(path, ".rockbox"));
@@ -52,7 +58,7 @@ public sealed class DeviceTests : IDisposable
         drives.Drives.Add(new DriveCandidate(FakeDrive("ipod", true, RealisticInfo), "IPOD", 80_000, 60_000));
         drives.Drives.Add(new DriveCandidate(FakeDrive("usbstick", false), "STICK", 1, 1));
 
-        var device = Assert.Single(new RockboxDeviceLocator(drives).FindDevices());
+        var device = Assert.Single(new IpodLocator(drives).FindDevices());
 
         Assert.Equal("IPOD", device.VolumeLabel);
         Assert.Equal("ipodvideo", device.RockboxTarget);
@@ -64,22 +70,47 @@ public sealed class DeviceTests : IDisposable
     [Fact]
     public void MissingInfoFile_IsFine_ButTargetIsUnsupported()
     {
-        var device = RockboxDeviceLocator.TryRead(new DriveCandidate(FakeDrive("ipod", true), "IPOD", 1, 1));
+        var device = IpodLocator.TryRead(new DriveCandidate(FakeDrive("ipod", true), "IPOD", 1, 1));
         Assert.NotNull(device);
         Assert.Null(device.RockboxTarget);
         Assert.False(device.IsSupportedTarget);
     }
 
     [Fact]
+    public void StockIpod_IsDetectedAsStock()
+    {
+        var device = IpodLocator.TryRead(new DriveCandidate(FakeDrive("stock", rockbox: false, stock: true), "IPOD", 80_000, 79_000));
+        Assert.NotNull(device);
+        Assert.Equal(IpodFirmware.Stock, device.Firmware);
+        Assert.True(device.IsSupportedTarget);
+        Assert.Null(device.RockboxTarget);
+    }
+
+    [Fact]
+    public void RockboxInstalledOverStockFirmware_IsRockbox()
+    {
+        var device = IpodLocator.TryRead(new DriveCandidate(FakeDrive("both", rockbox: true, RealisticInfo, stock: true), "IPOD", 1, 1));
+        Assert.Equal(IpodFirmware.Rockbox, device!.Firmware);
+    }
+
+    [Fact]
+    public void HalfAnIpodControlFolder_IsNotAnIpod()
+    {
+        var path = FakeDrive("odd", rockbox: false);
+        Directory.CreateDirectory(Path.Combine(path, "iPod_Control"));
+        Assert.Null(IpodLocator.TryRead(new DriveCandidate(path, "X", 1, 1)));
+    }
+
+    [Fact]
     public void DriveWithoutRockbox_IsIgnored() =>
-        Assert.Null(RockboxDeviceLocator.TryRead(new DriveCandidate(FakeDrive("plain", false), "X", 1, 1)));
+        Assert.Null(IpodLocator.TryRead(new DriveCandidate(FakeDrive("plain", false), "X", 1, 1)));
 
     [Fact]
     public void Detection_WritesNothing()
     {
         var path = FakeDrive("ipod", true, RealisticInfo);
         var before = Directory.GetFileSystemEntries(path, "*", SearchOption.AllDirectories).Order().ToList();
-        _ = RockboxDeviceLocator.TryRead(new DriveCandidate(path, "IPOD", 1, 1));
+        _ = IpodLocator.TryRead(new DriveCandidate(path, "IPOD", 1, 1));
         Assert.Equal(before, Directory.GetFileSystemEntries(path, "*", SearchOption.AllDirectories).Order());
     }
 
@@ -111,7 +142,7 @@ public sealed class DeviceTests : IDisposable
     public void Watcher_RaisesArrivedChangedAndRemoved()
     {
         var drives = new FakeDrives();
-        var watcher = new DeviceWatcher(new RockboxDeviceLocator(drives), TimeProvider.System);
+        var watcher = new DeviceWatcher(new IpodLocator(drives), TimeProvider.System);
         var events = new List<string>();
         watcher.DeviceArrived += (_, e) => events.Add("arrived " + e.Device.VolumeLabel);
         watcher.DeviceChanged += (_, e) => events.Add("changed " + e.Device.FreeBytes);
@@ -167,9 +198,9 @@ public sealed class DeviceTests : IDisposable
         }
     }
 
-    private sealed class SlowLocator(Action onScan) : IRockboxDeviceLocator
+    private sealed class SlowLocator(Action onScan) : IIpodLocator
     {
-        public IReadOnlyList<RockboxDevice> FindDevices()
+        public IReadOnlyList<IpodDevice> FindDevices()
         {
             onScan();
             return [];
@@ -181,8 +212,8 @@ public sealed class DeviceTests : IDisposable
     {
         var drives = new FakeDrives();
         drives.Drives.Add(new DriveCandidate(FakeDrive("ipod", true, RealisticInfo), "IPOD", 100, 50));
-        await using var watcher = new DeviceWatcher(new RockboxDeviceLocator(drives), TimeProvider.System) { Interval = TimeSpan.FromMilliseconds(20) };
-        var arrived = new TaskCompletionSource<RockboxDevice>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var watcher = new DeviceWatcher(new IpodLocator(drives), TimeProvider.System) { Interval = TimeSpan.FromMilliseconds(20) };
+        var arrived = new TaskCompletionSource<IpodDevice>(TaskCreationOptions.RunContinuationsAsynchronously);
         watcher.DeviceArrived += (_, e) => arrived.TrySetResult(e.Device);
 
         watcher.Start();

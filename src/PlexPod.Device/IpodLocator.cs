@@ -2,19 +2,35 @@ using PlexPod.Core.Models;
 
 namespace PlexPod.Device;
 
-public sealed record RockboxDevice(
+/// <summary>Which firmware's library PlexPod writes, and so which sync workflow runs (M6 plan §2).</summary>
+public enum IpodFirmware
+{
+    /// <summary>Rockbox: <c>/Music</c> folders, FLAC, <c>.m3u8</c> playlists, Rockbox's logs for stats.</summary>
+    Rockbox,
+
+    /// <summary>Apple's own firmware: <c>iPod_Control/Music/Fxx</c>, ALAC, the iTunesDB, Play Counts.</summary>
+    Stock,
+}
+
+public sealed record IpodDevice(
     string DriveRoot,
     string VolumeLabel,
     long TotalBytes,
     long FreeBytes,
+    IpodFirmware Firmware,
     string? RockboxTarget,
     string? RockboxVersion)
 {
-    /// <summary>The only target PlexPod is built and tested for.</summary>
+    /// <summary>The only Rockbox target PlexPod is built and tested for.</summary>
     public const string SupportedTarget = "ipodvideo";
 
-    /// <summary>False for other Rockbox players (untested) and for an unreadable target.</summary>
-    public bool IsSupportedTarget => string.Equals(RockboxTarget, SupportedTarget, StringComparison.OrdinalIgnoreCase);
+    /// <summary>
+    /// False for other Rockbox players (untested) and for an unreadable target. A stock iPod can't be
+    /// told apart by model here (its SysInfo is usually empty), so it counts as supported and the app
+    /// says which models the database suits.
+    /// </summary>
+    public bool IsSupportedTarget =>
+        Firmware == IpodFirmware.Stock || string.Equals(RockboxTarget, SupportedTarget, StringComparison.OrdinalIgnoreCase);
 
     public DeviceCapacity Capacity => new(TotalBytes, FreeBytes);
 }
@@ -56,20 +72,26 @@ public sealed class SystemDriveSource : IDriveSource
     }
 }
 
-public interface IRockboxDeviceLocator
+public interface IIpodLocator
 {
-    IReadOnlyList<RockboxDevice> FindDevices();
+    IReadOnlyList<IpodDevice> FindDevices();
 }
 
-/// <summary>Finds drives whose root contains <c>.rockbox</c>. Read-only: never writes to the device.</summary>
-public sealed class RockboxDeviceLocator(IDriveSource drives) : IRockboxDeviceLocator
+/// <summary>
+/// Finds iPods: a drive whose root has <c>.rockbox</c> is a Rockbox iPod; one with <c>iPod_Control</c>
+/// and no <c>.rockbox</c> runs Apple's stock firmware. Rockbox installs alongside the stock firmware
+/// (which keeps <c>iPod_Control</c>), so <c>.rockbox</c> decides: a Rockbox iPod is never given an
+/// Apple database by mistake. Read-only: never writes to the device.
+/// </summary>
+public sealed class IpodLocator(IDriveSource drives) : IIpodLocator
 {
     public const string RockboxFolder = ".rockbox";
     public const string InfoFile = "rockbox-info.txt";
+    public const string StockFolder = "iPod_Control";
 
-    public IReadOnlyList<RockboxDevice> FindDevices()
+    public IReadOnlyList<IpodDevice> FindDevices()
     {
-        var result = new List<RockboxDevice>();
+        var result = new List<IpodDevice>();
         foreach (var drive in drives.GetDrives())
         {
             if (TryRead(drive) is { } device)
@@ -81,7 +103,7 @@ public sealed class RockboxDeviceLocator(IDriveSource drives) : IRockboxDeviceLo
         return result;
     }
 
-    public static RockboxDevice? TryRead(DriveCandidate drive)
+    public static IpodDevice? TryRead(DriveCandidate drive)
     {
         ArgumentNullException.ThrowIfNull(drive);
         try
@@ -89,12 +111,15 @@ public sealed class RockboxDeviceLocator(IDriveSource drives) : IRockboxDeviceLo
             var rockbox = Path.Combine(drive.RootPath, RockboxFolder);
             if (!Directory.Exists(rockbox))
             {
-                return null;
+                return Directory.Exists(Path.Combine(drive.RootPath, StockFolder, "iTunes"))
+                    && Directory.Exists(Path.Combine(drive.RootPath, StockFolder, "Device"))
+                    ? new IpodDevice(drive.RootPath, drive.VolumeLabel, drive.TotalBytes, drive.FreeBytes, IpodFirmware.Stock, null, null)
+                    : null;
             }
 
             var infoPath = Path.Combine(rockbox, InfoFile);
             var info = File.Exists(infoPath) ? RockboxInfoParser.Parse(File.ReadAllText(infoPath)) : RockboxInfo.Empty;
-            return new RockboxDevice(drive.RootPath, drive.VolumeLabel, drive.TotalBytes, drive.FreeBytes, info.Target, info.Version);
+            return new IpodDevice(drive.RootPath, drive.VolumeLabel, drive.TotalBytes, drive.FreeBytes, IpodFirmware.Rockbox, info.Target, info.Version);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
