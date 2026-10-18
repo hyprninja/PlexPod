@@ -2,12 +2,13 @@
 
 RockPlex is a **Windows desktop app (.NET 10, WPF, Fluent theme)** that syncs a **Plex Media Server music library** to an **iPod 5.5G (Video) 80 GB running Rockbox**. Plex is the source of truth. The iPod should show exactly what Plex shows.
 
-**Status (18 Oct 2026):** M1 is done and verified by the owner against the real server. **Milestone 2 (media pipeline) is implemented** (`docs/M2-plan.md`, owner decisions D1–D4 in its §8): it builds clean and all 189 tests pass, including real ffmpeg conversions. **Verified by the owner (18 Oct):** a 48-track Test export of the real library (16/44.1 copies, 24/96, 24/48 and 24/44.1 conversions, M4A, messy FLACs) with 0 failures and a working conversion cache. **Still open:** the on-iPod spike tests (pipeline doc §7: playback, art on the WPS, first-wins tags, UTF-8 paths). The Plex JSON fixtures are still representative, not captured. Next: verify M2, then **Milestone 3** (sync engine).
+**Status (18 Oct 2026):** M1 is done and verified by the owner against the real server. **Milestone 2 (media pipeline) is implemented** (`docs/M2-plan.md`, owner decisions D1–D4 in its §8): it builds clean and all 189 tests pass, including real ffmpeg conversions. **Verified by the owner (18 Oct):** a 48-track Test export of the real library (16/44.1 copies, 24/96, 24/48 and 24/44.1 conversions, M4A, messy FLACs) with 0 failures and a working conversion cache. **Still open:** the on-iPod spike tests (pipeline doc §7: playback, art on the WPS, first-wins tags, UTF-8 paths). The Plex JSON fixtures are still representative, not captured. Spike tests passed on the iPod (owner set Rockbox's playlist viewer to *Title & Album from ID3 tags*). **Next: Milestone 3**, see `docs/M3-plan.md`.
 
 ## Read these first
 | File | What's in it |
 |---|---|
-| `docs/M2-plan.md` | Milestone 2 (implemented): media pipeline, acceptance criteria, owner decisions D1–D4 |
+| `docs/M3-plan.md` | **What to build now.** Sync engine: manifest, planner, fit check, playlist guarantees, interrupt safety, owner decisions D5–D7 |
+| `docs/M2-plan.md` | Milestone 2 (done): media pipeline, owner decisions D1–D4 |
 | `docs/M1-plan.md` | Milestone 1 (done): foundation + pickers |
 | `RockPlex-Research-Brief.md` | Plex API + Rockbox research, prior art, sources |
 | `RockPlex-Media-Pipeline.md` | Format rule, tag rewrite, album art (Milestone 2) |
@@ -59,7 +60,7 @@ dotnet run --project src/RockPlex.App
 | # | Scope |
 |---|---|
 | M1 | Foundation + pickers (read-only). ✅ done |
-| M2 | ✅ implemented, owner verification pending. Media pipeline: download original part, FLAC conversion (ffmpeg/soxr), tag wipe and rewrite (TagLibSharp), album art (baseline JPEG, embedded + `cover.jpg`) |
+| M2 | ✅ done. Media pipeline: download original part, FLAC conversion (ffmpeg/soxr), tag wipe and rewrite (TagLibSharp), album art (baseline JPEG, embedded + `cover.jpg`) |
 | **M3** | **← next.** Sync engine: device manifest, add/re-tag/remove, `.m3u8` playlists with guarantees, interrupt safety, fit-check gate, `/.rockplex/selection.json` on the iPod |
 | M4 | Stats return: Rockbox playback/scrobbler log + database changelog → Plex scrobble/rate |
 | M5 | Polish: tray, auto-sync on plug-in, Last.fm forwarding, optional "appears on" artist scope |
