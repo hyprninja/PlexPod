@@ -72,7 +72,7 @@ public sealed class TrackPipeline(
             var fromCache = false;
             if (action is FlacAction.Copy)
             {
-                staged = Path.Combine(work, "out" + ext);
+                staged = Path.Combine(work, "out" + ContainerCleaner.OutputExtension(ext));
                 if (ContainerCleaner.NeedsRemux(ext))
                 {
                     await cleaner.RemuxAsync(ffmpeg, original, staged, ct).ConfigureAwait(false);
@@ -98,6 +98,13 @@ public sealed class TrackPipeline(
             catch (Exception ex) when (ex is TagLib.CorruptFileException or TagWriteException or IOException)
             {
                 throw new PipelineException($"Tagging failed: {ex.Message}", ex);
+            }
+
+            // A format RockPlex writes tags for must come out tagged: an untagged copy would sit on the
+            // iPod with nothing to show, while the manifest claimed its tags were current.
+            if (outcome == TagWriteOutcome.NotRetagged && TagWriter.Writes(Path.GetExtension(staged)))
+            {
+                throw new PipelineException($"Couldn't write tags to this {Path.GetExtension(staged)} file.");
             }
 
             // Tagging must never touch the audio: compare against the untouched original (copies) or
@@ -234,6 +241,9 @@ public sealed class TrackPipeline(
         File.Move(staged, temp, overwrite: true);
         File.Move(temp, output, overwrite: true);
     }
+
+    /// <summary>The extension of the file on the iPod (a raw <c>.aac</c> is stored as <c>.m4a</c>).</summary>
+    public static string DeviceExtension(MediaPartRef part) => ContainerCleaner.OutputExtension(SourceExtension(part));
 
     internal static string SourceExtension(MediaPartRef part)
     {

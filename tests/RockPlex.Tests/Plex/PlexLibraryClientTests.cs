@@ -149,6 +149,24 @@ public sealed class PlexLibraryClientTests
     }
 
     [Fact]
+    public async Task Paging_IgnoredStart_WithoutTotalSize_FailsInsteadOfLoopingForever()
+    {
+        var fake = new FakeHttpHandler(_ => Json("""{ "MediaContainer": { "Metadata": [ { "ratingKey": "1" }, { "ratingKey": "2" } ] } }"""));
+        await Assert.ThrowsAsync<PlexProtocolException>(() => Create(fake, new PlexClientOptions { ClientIdentifier = "c", PageSize = 2 })
+            .GetAlbumsAsync("3", null, CancellationToken.None));
+        Assert.Equal(2, fake.Requests.Count);
+    }
+
+    [Fact]
+    public async Task Paging_IgnoredStartAndSize_ReturnsTheFirstAnswerOnce()
+    {
+        var fake = new FakeHttpHandler(_ => Json("""{ "MediaContainer": { "Metadata": [ { "ratingKey": "1" }, { "ratingKey": "2" }, { "ratingKey": "3" } ] } }"""));
+        var albums = await Create(fake, new PlexClientOptions { ClientIdentifier = "c", PageSize = 2 })
+            .GetAlbumsAsync("3", null, CancellationToken.None);
+        Assert.Equal(["1", "2", "3"], albums.Select(a => a.RatingKey));
+    }
+
+    [Fact]
     public async Task Playlists_KeepOnlyAudio()
     {
         var fake = new FakeHttpHandler(_ => Fixture("playlists.json"));

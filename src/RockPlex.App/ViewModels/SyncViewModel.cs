@@ -184,10 +184,12 @@ public sealed partial class SyncViewModel(
                     : $"Sync finished with {result.Failures.Count:N0} problem(s). Details: /.rockplex/{SyncEngine.ReportFileName} on the iPod.")
                 + StatsNote(result.Stats);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or HttpRequestException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            // The engine reports failures once it has started; this catches the rest (preflight), so
+            // they show here instead of as a generic crash dialog.
             logger.LogError(ex, "Sync failed");
-            ProgressText = $"Sync failed: {ex.Message}. Nothing is broken on the iPod; sync again to finish.";
+            ProgressText = $"Sync failed: {ex.Message} Nothing is broken on the iPod; sync again to finish.";
         }
         finally
         {
@@ -224,10 +226,10 @@ public sealed partial class SyncViewModel(
             var result = await Task.Run(() => stats.SendNowAsync(ipod.DriveRoot, client, options, hasRating, CancellationToken.None, sending));
             ProgressText = string.Join(" ", result.Lines);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogError(ex, "Send plays now failed");
-            ProgressText = $"Couldn't read the iPod: {ex.Message}";
+            ProgressText = $"Couldn't send plays: {ex.Message}";
         }
     }
 

@@ -554,6 +554,46 @@ public sealed class SyncEngineTests : IDisposable
         Assert.True(File.Exists(Local("/Music/Joni/1971 - Blue/08 ...It's Just Wide-Open Field.mp3")));
     }
 
+    [FfmpegFact]
+    public async Task StalePlaylist_WithABrokenLine_IsRemoved_NotBlockingTheSync()
+    {
+        await LibraryAsync();
+        await SyncAsync(Select(albumA: true, playlist: true));
+        File.Delete(Local("/Music/Joni/1971 - Blue/01 River.mp3")); // deleted by hand; only the playlist used it
+
+        var result = await SyncAsync(Select(albumA: true)); // the playlist is no longer selected
+
+        Assert.True(result.Completed, string.Join("\n", result.Failures));
+        Assert.Equal(1, result.PlaylistsRemoved);
+        Assert.False(File.Exists(Local("/Playlists/Road Trip.m3u8")));
+        Assert.True((await SyncAsync(Select(albumA: true))).Completed);
+        AssertUserFilesUntouched();
+    }
+
+    [FfmpegFact]
+    public async Task CoverTheUserReplaced_IsKept_AndHandedOver()
+    {
+        var (a1, a2, b1) = await LibraryAsync();
+        await SyncAsync(Select());
+        var cover = Local("/Music/Sigur Rós/2005 - Takk/cover.jpg");
+        var mine = TagWriterTests.Jpeg(300, 300);
+        File.WriteAllBytes(cover, mine);
+
+        // New art in Plex (a new thumb, so not the cached image), and the album is touched.
+        _client.Image = TagWriterTests.Jpeg(400, 400);
+        _client.Albums["alA"] = _client.Albums["alA"] with { ThumbPath = "/thumb/a-new" };
+        SetLibrary([a1 with { Title = "Glósóli (Remastered)", UpdatedAt = 2 }, a2, b1]);
+        var result = await SyncAsync(Select());
+
+        Assert.True(result.Completed, string.Join("\n", result.Failures));
+        Assert.Equal(mine, File.ReadAllBytes(cover));
+        Assert.True(result.Warnings.Any(w => w.Contains("Kept your own", StringComparison.Ordinal)), string.Join("\n", result.Warnings) + $"\nretagged={result.Retagged} moved={result.Moved}");
+        Assert.DoesNotContain((await ManifestAsync()).Extras, e => e.DevicePath.EndsWith("2005 - Takk/cover.jpg", StringComparison.Ordinal));
+
+        await SyncAsync(Select(albumA: false, albumB: true)); // album A deselected: its folder goes, the user's cover stays
+        Assert.Equal(mine, File.ReadAllBytes(cover));
+    }
+
     // ---------------------------------------------------------------- M4: stats return
 
     private const string PathA1 = "/Music/Sigur Rós/2005 - Takk/01 Glósóli.flac";

@@ -30,7 +30,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private readonly LibraryState _library;
     private readonly ConversionCache _conversions;
     private readonly ILogger<MainViewModel> _logger;
-    private readonly Debouncer _recalc = new(TimeSpan.FromMilliseconds(150));
+    private readonly Debouncer _recalc;
     private readonly HashSet<string> _enrichAttempted = new(StringComparer.Ordinal);
 
     private CancellationTokenSource _loadCts = new();
@@ -77,6 +77,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _library = library;
         _conversions = conversions;
         _logger = logger;
+        _recalc = new Debouncer(TimeSpan.FromMilliseconds(150), OnRecalculateFailed);
 
         Server.UrlOverride = settings.Current.ServerUrlOverride ?? string.Empty;
 
@@ -350,6 +351,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                     contentsMap[playlist.RatingKey] = contents;
                     await dispatcher.InvokeAsync(() =>
                     {
+                        // The user may have switched server or section meanwhile; rating keys repeat across
+                        // servers, so a late answer must not land on the new library's rows.
+                        if (token.IsCancellationRequested || !ReferenceEquals(_library.Snapshot, snapshot))
+                        {
+                            return;
+                        }
+
                         Selection.UpdatePlaylistRow(contents, snapshot);
                         ScheduleRecalc();
                     });
@@ -388,6 +396,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private void ScheduleRecalc() => _recalc.Schedule(RecalculateAsync);
 
     /// <summary>Resolves the selection on a background task, updates the bar, saves the selection, and starts enrichment.</summary>
+    private void OnRecalculateFailed(Exception ex)
+    {
+        _logger.LogError(ex, "Recalculating the selection failed");
+        Summary.IsCalculating = false;
+        StatusText = $"Couldn't update the selection summary: {ex.Message}";
+    }
+
     private async Task RecalculateAsync(CancellationToken ct)
     {
         var snapshot = _library.Snapshot;
@@ -435,7 +450,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// </summary>
     private void LoadKnownSizes()
     {
-        const long TagAllowance = 128 * 1024;
+        const long TagAllowance = RockPlex.Media.Sync.SyncEngine.TagAllowanceBytes; // the same allowance the sync plan uses
         if (_library.Snapshot is not { } snapshot)
         {
             return;

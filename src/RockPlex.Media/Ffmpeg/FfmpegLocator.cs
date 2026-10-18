@@ -6,7 +6,7 @@ namespace RockPlex.Media.Ffmpeg;
 /// <summary>A usable ffmpeg. Conversions need <see cref="HasSoxr"/>; copies and verification don't.</summary>
 public sealed record FfmpegInstall(string Path, string Version, bool HasSoxr)
 {
-    public string Description => $"ffmpeg {Version}{(HasSoxr ? " with soxr ✓" : " (no soxr: hi-res conversion unavailable)")}";
+    public string Description => $"ffmpeg {Version}{(HasSoxr ? " with soxr ✓" : " (no soxr: FLAC above 44.1 kHz can't be converted)")}";
 }
 
 /// <summary>

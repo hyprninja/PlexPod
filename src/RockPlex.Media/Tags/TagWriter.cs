@@ -72,6 +72,14 @@ public sealed class TagWriter
         }
     }
 
+    private static readonly HashSet<string> WrittenExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".flac", ".mp3", ".m4a", ".m4b", ".mp4", ".ogg", ".oga", ".opus",
+    };
+
+    /// <summary>Formats <see cref="Write"/> rewrites; anything else is copied with its tags as they are.</summary>
+    public static bool Writes(string extension) => WrittenExtensions.Contains(extension);
+
     /// <param name="gaplessInfo">MP4 only: an <c>iTunSMPB</c> value to write back after the wipe.</param>
     public static TagWriteOutcome Write(string path, TagSet tags, byte[]? coverJpeg, string? gaplessInfo = null)
     {

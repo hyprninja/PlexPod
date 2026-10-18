@@ -33,8 +33,13 @@ public sealed class FileLoggerProvider : ILoggerProvider
     public void Dispose()
     {
         _queue.CompleteAdding();
-        _writer.Join(TimeSpan.FromSeconds(2));
-        _queue.Dispose();
+
+        // If the writer is still draining (slow disk, antivirus), leave the queue to it: disposing it
+        // under GetConsumingEnumerable throws on the background thread and kills the process at exit.
+        if (_writer.Join(TimeSpan.FromSeconds(2)))
+        {
+            _queue.Dispose();
+        }
     }
 
     private void Enqueue(string line)

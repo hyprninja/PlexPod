@@ -97,8 +97,14 @@ public sealed partial class AudioVerifier(FfmpegRunner runner)
         }
     }
 
+    /// <summary>
+    /// Checksum of the demuxed audio packets. Raw ADTS packets carry a 7-byte header each, which the
+    /// remux to M4A moves into the container; stripping it here the same way compares like with like.
+    /// </summary>
     public Task<string> PacketMd5Async(FfmpegInstall ffmpeg, string path, CancellationToken ct) =>
-        Md5Async(ffmpeg, ["-hide_banner", "-nostdin", "-v", "error", "-i", path, "-map", "0:a:0", "-c", "copy", "-f", "md5", "-"], ct);
+        Md5Async(ffmpeg, path.EndsWith(".aac", StringComparison.OrdinalIgnoreCase)
+            ? ["-hide_banner", "-nostdin", "-v", "error", "-i", path, "-map", "0:a:0", "-c", "copy", "-bsf:a", "aac_adtstoasc", "-f", "md5", "-"]
+            : ["-hide_banner", "-nostdin", "-v", "error", "-i", path, "-map", "0:a:0", "-c", "copy", "-f", "md5", "-"], ct);
 
     public Task<string> DecodedMd5Async(FfmpegInstall ffmpeg, string path, CancellationToken ct) =>
         Md5Async(ffmpeg, ["-hide_banner", "-nostdin", "-v", "error", "-i", path, "-map", "0:a:0", "-f", "md5", "-"], ct);

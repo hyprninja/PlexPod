@@ -572,6 +572,15 @@ public sealed class SyncEngine(
                 continue;
             }
 
+            // The file RockPlex wrote has been replaced (its hash no longer matches the manifest): the
+            // user put their own art there. Hand it over to them rather than overwrite it.
+            if (extra is not null && userFiles.Contains(coverPath) && DeviceFileOps.HashFromDevice(DevicePaths.ToLocal(run.Root, coverPath)) != extra.Sha256)
+            {
+                run.State.Extras.Remove(coverPath);
+                run.Warnings.Add($"Kept your own {coverPath}; RockPlex won't change it again.");
+                continue;
+            }
+
             var temp = Path.Combine(paths.CacheRoot, "sync-staging", Guid.NewGuid().ToString("N") + ".jpg");
             Directory.CreateDirectory(Path.GetDirectoryName(temp)!);
             await File.WriteAllBytesAsync(temp, images.CoverJpeg).ConfigureAwait(false);
@@ -644,10 +653,16 @@ public sealed class SyncEngine(
     }
 
     /// <summary>P6: every RockPlex playlist re-read from the iPod, every line resolved with exact case.</summary>
+    /// <summary>
+    /// P6 for the playlists this sync keeps. Stale ones about to be removed aren't checked: their lines
+    /// may already point at files deleted by hand or moved, and failing on them would block their own
+    /// removal on every sync from then on.
+    /// </summary>
     private bool VerifyPlaylists(Run run)
     {
         run.Report("Checking playlists", 0, 1, string.Empty);
-        var problems = new PlaylistVerifier().Verify(run.Root, run.State.Playlists.Keys);
+        var removing = run.Preview.Plan.PlaylistRemovals.Select(p => p.DevicePath).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var problems = new PlaylistVerifier().Verify(run.Root, run.State.Playlists.Keys.Where(p => !removing.Contains(p)));
         if (problems.Count == 0)
         {
             return true;
@@ -772,7 +787,7 @@ public sealed class SyncEngine(
             var multiDisc = snapshot.TracksByAlbum(track.AlbumKey).Select(t => t.DiscIndex ?? 1).Distinct().Count() > 1;
             var path = DevicePathBuilder.Build(
                 new PathFields(album?.ArtistTitle ?? ArtistOf(snapshot, track), album?.Year, album?.Title, track.DiscIndex, track.Index, track.Title),
-                TrackPipeline.SourceExtension(track.Parts[0]),
+                TrackPipeline.DeviceExtension(track.Parts[0]),
                 multiDisc);
             var estimate = request.KnownSizes.TryGetValue(key, out var known)
                 ? known

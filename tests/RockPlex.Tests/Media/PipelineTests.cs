@@ -129,6 +129,46 @@ public sealed class PipelineTests : IDisposable
         Assert.Equal(TagLib.TagTypes.None, TagWriter.ReadBack(output).ForeignTags);
     }
 
+    [Theory]
+    [InlineData(44_100, 24, true)] // bit depth only: no resampling, so no soxr needed
+    [InlineData(96_000, 24, false)]
+    public void Conversion_NeedsSoxrOnlyToResample(int rate, int bits, bool worksWithoutSoxr)
+    {
+        var info = new FlacStreamInfo(4096, 4096, rate, 2, bits, 1000, new string('0', 32));
+        var action = Assert.IsType<FlacAction.Convert>(FinalFormatPolicy.Decide(info));
+        var noSoxr = new FfmpegInstall("ffmpeg.exe", "7.0", HasSoxr: false);
+        if (worksWithoutSoxr)
+        {
+            var args = FlacConverter.BuildArguments(noSoxr, "in.flac", "out.flac", info, action);
+            Assert.DoesNotContain(args, a => a.Contains("soxr", StringComparison.Ordinal));
+        }
+        else
+        {
+            Assert.Throws<NotSupportedException>(() => FlacConverter.BuildArguments(noSoxr, "in.flac", "out.flac", info, action));
+        }
+    }
+
+    [FfmpegFact]
+    public async Task RawAdtsAac_BecomesATaggedM4a_WithTheSameAudio()
+    {
+        var ffmpeg = await TestFfmpeg.InstallAsync();
+        var src = _dir.File("tone.aac");
+        await TestFfmpeg.Runner.RunAsync(ffmpeg.Path,
+            ["-hide_banner", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=1000:duration=1", "-c:a", "aac", "-f", "adts", src],
+            CancellationToken.None);
+        var client = new FakeLibraryClient();
+        client.PartFiles[7] = src;
+        var track = Track("t7", 7, "aac", 1, "Raw AAC");
+        Assert.Equal(".m4a", TrackPipeline.DeviceExtension(track.Parts[0]));
+        var output = _dir.File("raw.m4a");
+
+        var result = await Pipeline(out _).ProcessAsync(client, ffmpeg, Job(track, output), CancellationToken.None);
+
+        Assert.Equal(TagWriteOutcome.Retagged, result.Tagging);
+        Assert.Contains(TagWriter.ReadBack(output).Fields, f => f is { Key: "TITLE", Value: "Raw AAC" });
+        Assert.Equal(await _verifier.PacketMd5Async(ffmpeg, src, CancellationToken.None), await _verifier.PacketMd5Async(ffmpeg, output, CancellationToken.None));
+    }
+
     [FfmpegFact]
     public async Task M4a_IsRebuiltClean_KeepsGaplessInfo_AndAudioPackets()
     {

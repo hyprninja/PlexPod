@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Text;
 using Microsoft.Extensions.Logging;
 using RockPlex.Core.Models;
+using RockPlex.Core.Sync;
 using RockPlex.Core.Tagging;
 using RockPlex.Media.Art;
 using RockPlex.Media.Ffmpeg;
@@ -89,17 +90,14 @@ public sealed class TestExportService(
 
         // Device paths up front, so collisions within this export get a " (2)" suffix deterministically.
         var jobs = new List<TrackJob>();
-        var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var used = new PathAllocator([]);
         foreach (var track in request.Tracks.Where(t => t.IsAvailable))
         {
             var ctx = albums[track.AlbumKey];
-            var ext = TrackPipeline.SourceExtension(track.Parts[0]);
+            var ext = TrackPipeline.DeviceExtension(track.Parts[0]);
             var year = ctx.Album.Year ?? YearOf(ctx.Album.OriginallyAvailableAt);
             var devicePath = DevicePathBuilder.Build(new PathFields(ctx.Album.ArtistTitle, year, ctx.Album.Title, track.DiscIndex, track.Index, track.Title), ext, ctx.IsMultiDisc);
-            for (var n = 2; !used.Add(devicePath); n++)
-            {
-                devicePath = devicePath[..^ext.Length] + $" ({n})" + ext;
-            }
+            devicePath = used.Allocate(devicePath); // " (2)", " (3)"… each from the original name
 
             exported[track.RatingKey] = devicePath;
             jobs.Add(new TrackJob(track, ctx.Album, ctx.Artist, ctx.Tracks, null, ctx.Art, request.Policy, ToLocal(request.Folder, devicePath),

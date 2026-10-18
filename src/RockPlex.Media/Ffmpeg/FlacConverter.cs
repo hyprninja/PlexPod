@@ -27,11 +27,6 @@ public sealed class FlacConverter(FfmpegRunner runner)
         switch (action)
         {
             case FlacAction.Convert convert:
-                if (!ffmpeg.HasSoxr)
-                {
-                    throw new NotSupportedException("This ffmpeg build has no soxr resampler, so hi-res FLAC can't be converted.");
-                }
-
                 // ffmpeg's FLAC encoder writes 16- or 24/32-bit only, so a sub-16-bit source would come out
                 // with more bits than it went in. That breaks the never-upsample rule, so it is refused.
                 if (convert.TargetBits != 16)
@@ -39,7 +34,14 @@ public sealed class FlacConverter(FfmpegRunner runner)
                     throw new NotSupportedException($"Converting a {source.BitsPerSample}-bit source would raise its bit depth; it is reported instead.");
                 }
 
-                var filter = convert.TargetRateHz < source.SampleRateHz
+                // soxr is needed only to change the sample rate; a bit-depth-only step (24/44.1 → 16/44.1) dithers without it.
+                var resample = convert.TargetRateHz < source.SampleRateHz;
+                if (resample && !ffmpeg.HasSoxr)
+                {
+                    throw new NotSupportedException("This ffmpeg build has no soxr resampler, so FLAC above 44.1 kHz can't be converted.");
+                }
+
+                var filter = resample
                     ? string.Create(CultureInfo.InvariantCulture, $"aresample=osr={convert.TargetRateHz}:osf=s16:resampler=soxr:precision=28:dither_method=triangular")
                     : "aresample=osf=s16:dither_method=triangular";
                 args.AddRange(["-af", filter, "-sample_fmt", "s16"]);

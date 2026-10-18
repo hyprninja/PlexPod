@@ -287,10 +287,25 @@ public sealed class PlexLibraryClient(
     {
         var all = new List<MetadataDto>();
         var pageSize = Math.Max(1, options.PageSize);
+        List<MetadataDto>? previous = null;
         while (true)
         {
             var page = await GetContainerAsync(path, (all.Count, pageSize), ct).ConfigureAwait(false);
             var items = page.Metadata ?? [];
+
+            // A server (or proxy) that ignores X-Plex-Container-Start sends the same page again; without
+            // totalSize nothing else would ever end the loop.
+            if (previous is { Count: > 0 } && items.Count > 0 && items[0].RatingKey is { } first && first == previous[0].RatingKey)
+            {
+                if (previous.Count > pageSize)
+                {
+                    return all; // it ignored the page size too, so the first answer was everything
+                }
+
+                throw new PlexProtocolException("The Plex server ignored paging (X-Plex-Container-Start), so the list can't be read completely.");
+            }
+
+            previous = items;
             all.AddRange(items);
             progress?.Report(all.Count);
 

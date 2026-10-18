@@ -1,7 +1,11 @@
 namespace RockPlex.App.Services;
 
-/// <summary>Runs the latest scheduled action once things go quiet for <c>delay</c>; earlier calls are dropped.</summary>
-public sealed class Debouncer(TimeSpan delay) : IDisposable
+/// <summary>
+/// Runs the latest scheduled action once things go quiet for <c>delay</c>; earlier calls are dropped.
+/// <paramref name="onError"/> receives anything the action throws: <see cref="Schedule"/> is
+/// <c>async void</c>, so an escaped exception would otherwise take the app down.
+/// </summary>
+public sealed class Debouncer(TimeSpan delay, Action<Exception> onError) : IDisposable
 {
     private CancellationTokenSource? _pending;
 
@@ -20,6 +24,10 @@ public sealed class Debouncer(TimeSpan delay) : IDisposable
         catch (OperationCanceledException) when (cts.IsCancellationRequested)
         {
             // Superseded by a newer call.
+        }
+        catch (Exception ex)
+        {
+            onError(ex);
         }
     }
 
