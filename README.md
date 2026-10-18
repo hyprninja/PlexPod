@@ -67,12 +67,16 @@ PlexPod recognises those models (from the USB id, the iPod's SysInfo files or th
 ## Getting started
 
 **You'll need**
-- Windows 10 or 11, and the [.NET 10 SDK](https://dotnet.microsoft.com/download) to build it (there's no installer yet)
+- Windows 10 or 11 (64-bit)
 - A Plex Media Server with a music library
 - An iPod that works with PlexPod (see [Which iPods work](#which-ipods-work)), connected in disk mode
 - **ffmpeg** with soxr: `winget install Gyan.FFmpeg`. PlexPod finds it automatically.
 
-**Run it**
+**Install it**
+
+Download **PlexPod-x.y.z-x64.msi** from the [latest release](https://github.com/hyprninja/PlexPod/releases/latest) and run it. It includes everything PlexPod needs. The installer isn't code-signed yet, so Windows may warn about an unknown publisher: choose **More info → Run anyway**. Then start **PlexPod** from the Start menu.
+
+Or run it from source with the [.NET 10 SDK](https://dotnet.microsoft.com/download):
 ```bash
 git clone https://github.com/hyprninja/PlexPod.git
 cd PlexPod
@@ -112,6 +116,7 @@ dotnet run --project src/PlexPod.App
 dotnet build PlexPod.slnx -c Debug
 dotnet test  PlexPod.slnx
 ```
+To build the installer (WiX Toolset 5, restored as a local dotnet tool), run `installer\build.ps1`; it writes `installer\out\PlexPod-<version>-x64.msi`.
 .NET 10, WPF with the Fluent theme, CommunityToolkit.Mvvm, TagLibSharp and ffmpeg. The iPod database format follows [libgpod](https://github.com/gtkpod/libgpod). Design notes and milestone plans are in [`docs/`](docs/) and [`CLAUDE.md`](CLAUDE.md).
 
 <details>

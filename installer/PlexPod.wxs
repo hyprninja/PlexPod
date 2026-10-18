@@ -1,0 +1,52 @@
+<!--
+  PlexPod's Windows installer (WiX Toolset 5). Build it with installer\build.ps1, which publishes a
+  self-contained release build first. Installs for all users into Program Files with a Start menu
+  shortcut. Settings, the Plex token and play history live in %LOCALAPPDATA%\PlexPod and are left
+  alone by install, upgrade and uninstall. Keep UpgradeCode fixed so newer versions replace older ones.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="PlexPod"
+           Manufacturer="hyprninja"
+           Version="$(var.Version)"
+           UpgradeCode="489F4879-FADA-4350-9D87-1E8C04DF4C29"
+           Scope="perMachine"
+           Compressed="yes">
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of PlexPod is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="PlexPod.ico" SourceFile="$(var.RepoDir)\src\PlexPod.App\Assets\PlexPod.ico" />
+    <Property Id="ARPPRODUCTICON" Value="PlexPod.ico" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/hyprninja/PlexPod" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/hyprninja/PlexPod#readme" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="PlexPod" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+
+    <Feature Id="Main" Title="PlexPod">
+      <ComponentRef Id="MainExecutable" />
+      <ComponentGroupRef Id="AppFiles" />
+    </Feature>
+  </Package>
+
+  <Fragment>
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="MainExecutable">
+        <File Id="PlexPodExe" Source="$(var.PublishDir)\PlexPod.exe" KeyPath="yes">
+          <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="PlexPod"
+                    Description="Sync your Plex music library to an iPod"
+                    WorkingDirectory="INSTALLFOLDER" Icon="PlexPod.ico" Advertise="yes" />
+        </File>
+      </Component>
+    </DirectoryRef>
+
+    <!-- Everything else the self-contained publish produced (the .NET runtime, WPF, libraries). -->
+    <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
+      <Files Include="$(var.PublishDir)\**">
+        <Exclude Files="$(var.PublishDir)\PlexPod.exe" />
+      </Files>
+    </ComponentGroup>
+  </Fragment>
+</Wix>
