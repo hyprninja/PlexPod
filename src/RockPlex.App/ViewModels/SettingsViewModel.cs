@@ -3,9 +3,11 @@ using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using RockPlex.App.Services;
+using RockPlex.Core.Stats;
 using RockPlex.Core.Tagging;
 using RockPlex.Media.Ffmpeg;
 using RockPlex.Media.Pipeline;
+using RockPlex.Media.Stats;
 
 namespace RockPlex.App.ViewModels;
 
@@ -24,7 +26,7 @@ public sealed partial class TagFieldViewModel(TagField field, bool isOn, Action 
     partial void OnIsOnChanged(bool value) => changed();
 }
 
-/// <summary>ffmpeg location, conversion-cache cap and the per-field tag policy (D4). Saved on change.</summary>
+/// <summary>ffmpeg location, conversion-cache cap, the per-field tag policy (D4) and stats return (D10, D11). Saved on change.</summary>
 public sealed partial class SettingsViewModel : ObservableObject
 {
     private readonly SettingsStore _settings;
@@ -43,6 +45,8 @@ public sealed partial class SettingsViewModel : ObservableObject
         FfmpegPath = current.FfmpegPath ?? string.Empty;
         CacheCapGb = current.ConversionCacheCapGb.ToString(CultureInfo.CurrentCulture);
         _cache.CapBytes = Math.Max(1, current.ConversionCacheCapGb) * 1024L * 1024 * 1024;
+        StatsReturn = current.StatsReturn;
+        RatingsFillGapsOnly = current.RatingsFromIpod == RatingMode.FillGapsOnly;
         foreach (var field in TagPolicy.Fields)
         {
             var row = new TagFieldViewModel(field, field.Get(current.TagPolicy), OnPolicyChanged);
@@ -78,6 +82,25 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     [ObservableProperty]
     public partial string CoreWarning { get; private set; } = string.Empty;
+
+    [ObservableProperty]
+    public partial bool StatsReturn { get; set; }
+
+    /// <summary>D10. The two radio buttons bind to this and <see cref="RatingsIpodWins"/>.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(RatingsIpodWins))]
+    public partial bool RatingsFillGapsOnly { get; set; }
+
+    public bool RatingsIpodWins
+    {
+        get => !RatingsFillGapsOnly;
+        set => RatingsFillGapsOnly = !value;
+    }
+
+    public RatingMode RatingMode => RatingsFillGapsOnly ? RatingMode.FillGapsOnly : RatingMode.IpodWins;
+
+    /// <summary>What a sync sends to Plex first; null when stats return is switched off.</summary>
+    public StatsOptions? StatsOptions => StatsReturn ? new StatsOptions(RatingMode) : null;
 
     [RelayCommand]
     public async Task DetectAsync()
@@ -117,6 +140,23 @@ public sealed partial class SettingsViewModel : ObservableObject
 
         _cache.CapBytes = gb * 1024L * 1024 * 1024;
         _ = _settings.UpdateAsync(s => s with { ConversionCacheCapGb = gb }, CancellationToken.None);
+    }
+
+    partial void OnStatsReturnChanged(bool value)
+    {
+        if (!_loading)
+        {
+            _ = _settings.UpdateAsync(s => s with { StatsReturn = value }, CancellationToken.None);
+        }
+    }
+
+    partial void OnRatingsFillGapsOnlyChanged(bool value)
+    {
+        if (!_loading)
+        {
+            var mode = RatingMode;
+            _ = _settings.UpdateAsync(s => s with { RatingsFromIpod = mode }, CancellationToken.None);
+        }
     }
 
     private async void OnPolicyChanged()

@@ -2,6 +2,7 @@ using System.IO;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using RockPlex.Core.Models;
+using RockPlex.Core.Stats;
 using RockPlex.Core.Tagging;
 
 namespace RockPlex.App.Services;
@@ -26,6 +27,12 @@ public sealed record AppSettings
 
     /// <summary>Which tag fields are written to the iPod copies (D4).</summary>
     public TagPolicy TagPolicy { get; init; } = TagPolicy.Default;
+
+    /// <summary>Send plays and ratings from the iPod to Plex at every sync (M4, D11).</summary>
+    public bool StatsReturn { get; init; } = true;
+
+    /// <summary>D10: whether a rating changed on the iPod replaces Plex's, or only fills gaps.</summary>
+    public RatingMode RatingsFromIpod { get; init; } = RatingMode.IpodWins;
 }
 
 /// <summary>

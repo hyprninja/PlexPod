@@ -1,5 +1,7 @@
 # Milestone 4: Stats Return (iPod → Plex)
 
+**Status:** implemented (343 tests green); owner verification on the real iPod and Plex server pending.
+
 **Goal:** what you play and rate on the iPod shows up in Plex. Every sync starts by reading the iPod's listening history, matching each play to its Plex track exactly (through RockPlex's manifest, not by guessing from tags), and sending the plays and rating changes to Plex. This happens *before* anything on the iPod changes, so plays of tracks about to be removed are never lost.
 
 Design sources: research brief §2.8, selection doc §4 step 0, and the invariants in `../CLAUDE.md` (the only Plex writes ever allowed are play and rating write-back).
@@ -34,7 +36,7 @@ Design sources: research brief §2.8, selection doc §4 step 0, and the invarian
 - The same play line is never sent twice: see the bookmark (§3).
 
 ## 3. State and history
-- **On the iPod**, `/.rockplex/stats.json` (RockPlex's own file): a bookmark per log file (name, bytes already processed, and a fingerprint of its first line so a rotated or replaced log is recognised), plus the last rating sent per track. Decision **D9** covers whether Rockbox's own log files are left in place.
+- **On the iPod**, `/.rockplex/stats.json` (RockPlex's own file): a bookmark per log file (name, bytes already processed, and a SHA-256 of exactly those bytes), plus the last rating sent per track. Logs only grow and a rotated log keeps its content, so a file whose first *n* bytes hash the same is the same log under any name; anything else (a replaced log, even with an identical header) is read from the start. Rockbox's own log files are left in place (**D9**).
 - **On the PC**, `%LOCALAPPDATA%\RockPlex\stats\<device id>\`: a copy of every log processed, plus `plays.jsonl` with every play sent (track, real time, elapsed). That's a backup, and the source of real timestamps for Last.fm in M5.
 - **Delivery:** plays are sent in order and the bookmark is saved every few plays and after the last one. If Plex is unreachable, sending stops, the bookmark stays before the first unsent play, and the next sync continues from there. A crash between sending a play and saving the bookmark can at worst send that one play twice.
 
@@ -43,7 +45,7 @@ Design sources: research brief §2.8, selection doc §4 step 0, and the invarian
   - *iPod changes win* (default): send it.
   - *Only fill gaps*: send it only if the track has no rating in Plex (Plex's `userRating`, which the track list RockPlex already loads includes, so no extra requests).
 - Rockbox stores "never rated" as 0; a 0 that was never anything else is not sent, so unrated tracks don't wipe Plex ratings.
-- If the changelog hasn't changed since the last sync (same fingerprint), nothing is sent.
+- If the changelog hasn't changed since the last sync, nothing is sent: every rating equals what was last sent.
 
 ## 5. Where it runs
 - **Step 0 of every sync** (decision **D11**), after preflight and before any change to the iPod. The plan dialog shows *"Will send N plays and M ratings to Plex"*, and the sync report lists what was sent.
@@ -52,11 +54,11 @@ Design sources: research brief §2.8, selection doc §4 step 0, and the invarian
 - **Hints:** if the iPod has no playback log at all, the app explains how to turn on Logging. If the changelog is older than the newest log, it suggests *Export Modifications*.
 
 ## 6. Code
-- **Core (pure):** `PlaybackLogParser` (lines, headers, malformed lines skipped), `ChangelogParser` (quoted `tag="value"` with escapes), `PlayFilter` (threshold), `StatsPlanner` (log lines + bookmark + manifest → plays to send; changelog + last-sent ratings → ratings to send).
-- **Device:** `StatsReader` (lists and reads `/.rockbox/playback*.log` and the changelog, read-only) and `StatsStore` (`/.rockplex/stats.json`, atomic writes).
-- **Plex:** `ScrobbleAsync(ratingKey)` and `RateAsync(ratingKey, rating)` on the library client. These are the only write calls RockPlex makes to Plex.
-- **Media:** `StatsService` (collect → send → save bookmark → archive), called from `SyncEngine` preflight and from the app.
-- **App:** plan dialog line, report lines, *Send plays now*, setting to switch stats return on or off, hints.
+- **Core (pure), `RockPlex.Core/Stats`:** `PlaybackLogParser` (lines, headers, malformed lines skipped, an unfinished last line left for later), `ChangelogParser` (quoted `tag="value"` with escapes), `PlayRule` (≥ 90%, integer arithmetic), `StatsPlanner` (logs + bookmarks + manifest → play steps in order; changelog + last-sent ratings → ratings to send), `LogBookmark` (prefix hash).
+- **Device:** `StatsReader` (lists and reads `/.rockbox/playback*.log`, rotated logs in number order then the current one, and the changelog; read-only, shared with Rockbox, size-capped) and `DeviceStore.Load/SaveStatsAsync` (`/.rockplex/stats.json`, atomic writes, sanitised on load).
+- **Plex:** `ScrobbleAsync(ratingKey)` and `RateAsync(ratingKey, rating)` on the library client, the only write calls RockPlex makes to Plex, never retried. `TrackItem.UserRating` comes from the track list (for *Only fill gaps*).
+- **Media:** `StatsService` (preview → send in order, bookmark saved every 10 plays and in a `finally` → PC archive). `SyncEngine` runs it as step 0, right after preflight, re-reading the iPod at that point so plays sent in between are never sent twice. `SendNowAsync` does the same without a sync.
+- **App:** plan dialog line (*First: send N plays and M ratings*), hints, sync report and status line, *Send plays now* button, Settings → *Plays and ratings* (on/off, *Ratings from the iPod*).
 
 ## 7. Tests
 - **Parsers:** real-format log lines (headers, a path with `:` characters in it, CRLF, truncated last line, junk); changelog escapes and quoted values; rotated logs read in order.

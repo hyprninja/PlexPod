@@ -2,12 +2,12 @@
 
 RockPlex is a **Windows desktop app (.NET 10, WPF, Fluent theme)** that syncs a **Plex Media Server music library** to an **iPod 5.5G (Video) 80 GB running Rockbox**. Plex is the source of truth. The iPod should show exactly what Plex shows.
 
-**Status (18 Oct 2026):** M1, M2 and **M3 are done** and verified by the owner on the real library and iPod: a full sync of several playlists (~870 tracks, hi-res conversions, M4A, adopted test-export files), followed by a full bug/security review and fixes (path confinement, manifest reconciliation, token scoping, art and download robustness). 295 tests pass. The Plex JSON fixtures are still representative, not captured. **Next: M4** (stats return), see `docs/M4-plan.md` (owner decisions D8–D11 in its §9).
+**Status (18 Oct 2026):** M1, M2 and **M3 are done** and verified by the owner on the real library and iPod: a full sync of several playlists (~870 tracks, hi-res conversions, M4A, adopted test-export files), followed by a full bug/security review and fixes (path confinement, manifest reconciliation, token scoping, art and download robustness). **M4 (stats return) is implemented** per `docs/M4-plan.md` (owner decisions D8–D11 in its §9): builds clean, 343 tests pass, including end-to-end syncs against a temp-folder iPod and a fake Plex (plays sent before removals, Plex outage resumes, rotated logs, ratings modes, Send plays now). **Not yet checked by the owner:** plays and ratings reaching the real Plex server from the real iPod (acceptance criteria 2–6). The Plex JSON fixtures are still representative, not captured. Next: verify M4, then M5.
 
 ## Read these first
 | File | What's in it |
 |---|---|
-| `docs/M4-plan.md` | **What to build now.** Stats return: Rockbox playback log + database changelog → Plex plays and ratings, owner decisions D8–D11 |
+| `docs/M4-plan.md` | Milestone 4 (implemented, owner verification pending): stats return, Rockbox playback log + database changelog → Plex plays and ratings, owner decisions D8–D11 |
 | `docs/M3-plan.md` | Milestone 3 (done): sync engine, manifest, playlist guarantees, owner decisions D5–D7 |
 | `docs/M2-plan.md` | Milestone 2 (done): media pipeline, owner decisions D1–D4 |
 | `docs/M1-plan.md` | Milestone 1 (done): foundation + pickers |
@@ -28,7 +28,8 @@ Status markers in those docs: ✅ verified from a primary source · ⚠️ infer
 8. **Milestone 1 = foundation + pickers** (Plex sign-in, discovery, library fetch, iPod detection, pickers with live capacity bar). **Nothing is written to the iPod in M1.**
 
 ## Invariants (hard rules for all code)
-- **Read-only against Plex libraries.** The only Plex writes ever allowed are play/rating write-back (M4).
+- **Read-only against Plex libraries.** The only Plex writes ever allowed are play/rating write-back (M4): `ScrobbleAsync` and `RateAsync`, which are never retried (a retried scrobble would count a play twice).
+- **Rockbox's own files are only read** (D9): the playback logs and changelog are never modified, moved or deleted. RockPlex's progress through them lives in `/.rockplex/stats.json`.
 - **Never upsample.** Non-FLAC audio is never re-encoded.
 - **Playlists are never partially copied and never contain a broken entry.** Selecting a playlist pulls in all its tracks; over capacity → block the sync, never trim.
 - **Sync order:** collect stats → copy/verify tracks → write playlists (temp file + rename, then re-read and resolve every line) → delete unreferenced files **last**.
@@ -65,8 +66,9 @@ dotnet run --project src/RockPlex.App
 | M1 | Foundation + pickers (read-only). ✅ done |
 | M2 | ✅ done. Media pipeline: download original part, FLAC conversion (ffmpeg/soxr), tag wipe and rewrite (TagLibSharp), album art (baseline JPEG, embedded + `cover.jpg`) |
 | M3 | ✅ done. Sync engine: device manifest, add/re-tag/remove, `.m3u8` playlists with guarantees, interrupt safety, fit-check gate, `/.rockplex/selection.json` on the iPod |
-| **M4** | **← next.** Stats return: Rockbox playback/scrobbler log + database changelog → Plex scrobble/rate |
-| M5 | Polish: tray, auto-sync on plug-in, Last.fm forwarding, optional "appears on" artist scope |
+| M4 | ✅ implemented, owner verification pending. Stats return: Rockbox playback log + database changelog → Plex scrobble/rate, step 0 of every sync, Send plays now |
+| **M5** | **← next.** Polish (below) |
+| M5 | Polish: tray, auto-sync on plug-in, Last.fm forwarding (from `stats\<device>\plays.jsonl`), optional "appears on" artist scope |
 
 ## Technical cheat-sheet
 
@@ -81,7 +83,7 @@ dotnet run --project src/RockPlex.App
 - **Stream details** (`bitDepth`, `samplingRate`, `gain`, `albumGain`, `peak`) are in `GET /library/metadata/{ratingKey}` and probably **not** in list responses ⚠️. Estimate conservatively and fetch details on demand.
 - Playlists: `GET /playlists?playlistType=audio` ⚠️ → `ratingKey`, `key`, `title`, `smart`, `leafCount`, `duration`. Items: `GET {key}` (`/playlists/{id}/items`) ✅, paged. The same call is used for smart playlists ⚠️🔬. Each entry has a `playlistItemID`; **duplicates are legal; keep them and their order**.
 - Download original (M2): `{server}{Part.key}?download=1`. Art: the album `thumb`, or `/photo/:/transcode?width=&height=&url=`.
-- Write-back (M4) ⚠️: `/:/scrobble?key={rk}&identifier=com.plexapp.plugins.library`, `/:/rate?key={rk}&identifier=com.plexapp.plugins.library&rating={0-10}`.
+- Write-back (M4) ✅ (python-plexapi): `GET /:/scrobble?key={rk}&identifier=com.plexapp.plugins.library`, `PUT /:/rate?key={rk}&identifier=com.plexapp.plugins.library&rating={0-10}` (`-1` clears). Plex can't back-date a play. 🔬 not yet tried against the real server.
 
 ### Rockbox on the iPod Video
 - Detection: a ready drive whose root contains **`/.rockbox`**. `/.rockbox/rockbox-info.txt` holds `key: value` lines (Target, Version, …) ⚠️; parse leniently.

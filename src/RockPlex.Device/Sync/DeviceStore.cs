@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using RockPlex.Core.Stats;
 using RockPlex.Core.Sync;
 
 namespace RockPlex.Device.Sync;
@@ -36,6 +37,8 @@ public sealed class DeviceStore(string driveRoot)
     private string PreviousManifestPath => Path.Combine(Folder, "manifest.prev.json");
 
     private string DevicePath => Path.Combine(Folder, "device.json");
+
+    private string StatsPath => Path.Combine(Folder, "stats.json");
 
     public async Task<(DeviceManifest? Manifest, ManifestSource Source)> LoadManifestAsync(CancellationToken ct)
     {
@@ -82,6 +85,23 @@ public sealed class DeviceStore(string driveRoot)
 
     /// <summary>Reads <c>device.json</c> without creating it (for plug-in detection).</summary>
     public Task<DeviceIdentity?> TryReadIdentityAsync(CancellationToken ct) => TryReadAsync<DeviceIdentity>(DevicePath, ct);
+
+    /// <summary>Stats-return bookmarks and last-sent ratings (M4). Unreadable → empty, which at worst resends plays once.</summary>
+    public async Task<StatsState> LoadStatsAsync(CancellationToken ct) =>
+        await TryReadAsync<StatsState>(StatsPath, ct).ConfigureAwait(false) is { } state
+            ? state with
+            {
+                // The file is untrusted: drop null or nonsense entries.
+                Bookmarks = (state.Bookmarks ?? []).Where(b => b is { PrefixHash.Length: 64, FileName: not null, ProcessedBytes: > 0 }).ToList(),
+                RatingsSent = state.RatingsSent ?? new Dictionary<string, int>(),
+            }
+            : StatsState.Empty;
+
+    public Task SaveStatsAsync(StatsState state, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        return WriteAtomicAsync(StatsPath, JsonSerializer.Serialize(state, Json), ct);
+    }
 
     public Task WriteTextAsync(string fileName, string content, CancellationToken ct) =>
         WriteAtomicAsync(Path.Combine(Folder, fileName), content, ct);

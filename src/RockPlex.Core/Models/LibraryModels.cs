@@ -53,7 +53,8 @@ public sealed record TrackItem(
     long DurationMs,
     AudioFormat Format,
     IReadOnlyList<MediaPartRef> Parts,
-    long? UpdatedAt = null)
+    long? UpdatedAt = null,
+    double? UserRating = null)
 {
     public bool IsAvailable => Parts.Count > 0;
 

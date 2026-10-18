@@ -36,6 +36,19 @@
                 </DockPanel>
                 <TextBlock Text="{Binding FfmpegStatus}" TextWrapping="Wrap" Margin="0,4,0,0" />
 
+                <TextBlock Text="Plays and ratings" FontWeight="SemiBold" FontSize="16" Margin="0,18,0,0" />
+                <CheckBox IsChecked="{Binding StatsReturn}" Margin="0,4,0,0"
+                          Content="Send plays and ratings from the iPod to Plex at every sync" />
+                <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="0,4,0,6"
+                           Text="Plays are recorded only with Rockbox's Settings → Playback Settings → Logging turned on, and count when at least 90% of the track was played. Ratings reach Plex after Settings → General Settings → Database → Export Modifications on the iPod. Rockbox's own files are only read, never changed." />
+                <StackPanel IsEnabled="{Binding StatsReturn}" Margin="0,0,0,0">
+                    <TextBlock Text="Ratings from the iPod" FontWeight="SemiBold" Margin="0,2,0,2" />
+                    <RadioButton GroupName="Ratings" IsChecked="{Binding RatingsIpodWins}" Margin="0,2"
+                                 Content="iPod changes win: a rating changed on the iPod replaces the one in Plex" />
+                    <RadioButton GroupName="Ratings" IsChecked="{Binding RatingsFillGapsOnly}" Margin="0,2"
+                                 Content="Only fill gaps: sent only for tracks with no rating in Plex" />
+                </StackPanel>
+
                 <TextBlock Text="Conversion cache" FontWeight="SemiBold" FontSize="16" Margin="0,18,0,0" />
                 <TextBlock Text="Converted hi-res files are kept so a tag change in Plex never re-converts. The oldest are removed above the cap."
                            TextWrapping="Wrap" Opacity="0.75" Margin="0,2,0,6" />

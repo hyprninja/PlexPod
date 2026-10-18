@@ -135,6 +135,28 @@ internal sealed class FakeLibraryClient : IPlexLibraryClient
 
     public Task<PlexTrackDetail?> GetTrackDetailAsync(string ratingKey, CancellationToken ct) => Task.FromResult<PlexTrackDetail?>(null);
 
+    /// <summary>Every play and rating sent, in order ("play:101", "rate:101=8").</summary>
+    public List<string> Writes { get; } = [];
+
+    /// <summary>Fails a write before it reaches the fake server (e.g. Plex down after n plays).</summary>
+    public Func<string, bool>? FailWrite { get; set; }
+
+    public Task ScrobbleAsync(string ratingKey, CancellationToken ct) => Write($"play:{ratingKey}");
+
+    public Task RateAsync(string ratingKey, double rating, CancellationToken ct) =>
+        Write(string.Create(System.Globalization.CultureInfo.InvariantCulture, $"rate:{ratingKey}={rating}"));
+
+    private Task Write(string what)
+    {
+        if (FailWrite?.Invoke(what) == true)
+        {
+            throw new HttpRequestException("simulated Plex outage");
+        }
+
+        Writes.Add(what);
+        return Task.CompletedTask;
+    }
+
     public Task<IReadOnlyList<MusicSection>> GetMusicSectionsAsync(CancellationToken ct) => throw new NotSupportedException();
 
     public Task<IReadOnlyList<ArtistItem>> GetArtistsAsync(string sectionKey, IProgress<int>? progress, CancellationToken ct) => throw new NotSupportedException();

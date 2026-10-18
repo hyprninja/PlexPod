@@ -63,7 +63,8 @@ internal static class PlexMapper
             m.Duration ?? 0,
             format,
             partRefs,
-            m.UpdatedAt);
+            m.UpdatedAt,
+            m.UserRating);
     }
 
     public static PlaylistItem ToPlaylist(MetadataDto m)

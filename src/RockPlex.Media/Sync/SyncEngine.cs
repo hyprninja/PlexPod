@@ -12,19 +12,22 @@ using RockPlex.Core.Tagging;
 using RockPlex.Device.Sync;
 using RockPlex.Media.Art;
 using RockPlex.Media.Pipeline;
+using RockPlex.Media.Stats;
 
 namespace RockPlex.Media.Sync;
 
 /// <summary>
 /// Makes the iPod's RockPlex content match the selection (M3 plan §5), in the mandated order:
-/// [make room] → moves → tracks (produce, copy, read back, rename) → playlists → line check (P6) →
-/// removals last → commit. Only files in the manifest are ever changed or deleted.
+/// plays and ratings to Plex (M4, step 0) → [make room] → moves → tracks (produce, copy, read back,
+/// rename) → playlists → line check (P6) → removals last → commit. Only files in the manifest are
+/// ever changed or deleted.
 /// </summary>
 public sealed class SyncEngine(
     TrackPipeline pipeline,
     AlbumArtProvider art,
     MediaPaths paths,
     DeviceFileOps files,
+    StatsService stats,
     ILogger<SyncEngine> logger)
 {
     /// <summary>Allowance per track for tags and embedded art written on top of the audio.</summary>
@@ -131,11 +134,19 @@ public sealed class SyncEngine(
             blockers.Add($"The selection doesn't fit: {Mb(fit.OverBy)} MB over, even after removals.");
         }
 
+        StatsPreview? statsPreview = null;
+        if (request.Stats is { } statsOptions)
+        {
+            progress?.Report("Reading plays on the iPod…");
+            statsPreview = await stats.PreviewAsync(root, manifest, statsOptions, PlexHasRating(request.Snapshot), ct).ConfigureAwait(false);
+        }
+
         return new SyncPreview(request, identity, manifest, source, adoption, plan, fit, blockers)
         {
             Notes = notes,
             DeviceFingerprint = Fingerprint(root),
             NotOurs = [.. stillNotOurs, .. adoption.NotOurs],
+            Stats = statsPreview,
         };
     }
 
@@ -154,6 +165,7 @@ public sealed class SyncEngine(
             }
 
             await PreflightAsync(run).ConfigureAwait(false);
+            await StatsAsync(run).ConfigureAwait(false);
             if (preview.UsesMakeRoom)
             {
                 await MakeRoomAsync(run).ConfigureAwait(false);
@@ -258,6 +270,29 @@ public sealed class SyncEngine(
 
         await run.SaveAsync().ConfigureAwait(false); // persists adoption and the device id before any change
     }
+
+    /// <summary>
+    /// Step 0 (M4, D11): plays and ratings go to Plex before anything on the iPod changes, so plays of
+    /// tracks about to be removed still count. Re-read now rather than taken from the plan, so plays
+    /// sent since (Send plays now) aren't sent twice. Plex being down never stops the sync.
+    /// </summary>
+    private async Task StatsAsync(Run run)
+    {
+        var request = run.Preview.Request;
+        if (request.Stats is not { } options)
+        {
+            return;
+        }
+
+        run.Report("Sending plays to Plex", 0, 0, string.Empty);
+        var fresh = await stats.PreviewAsync(request.DriveRoot, run.Preview.Manifest, options, PlexHasRating(request.Snapshot), run.Stop).ConfigureAwait(false);
+        var sending = new Progress<(int Done, int Total)>(p => run.Report("Sending plays to Plex", p.Done, p.Total, string.Empty));
+        run.Stats = await stats.SendAsync(fresh, request.DriveRoot, run.State.DeviceId, request.Client, run.Stop, sending).ConfigureAwait(false);
+    }
+
+    /// <summary>D10 "Only fill gaps": whether Plex already has a rating for a track (from the loaded track list).</summary>
+    public static Func<string, bool> PlexHasRating(LibrarySnapshot snapshot) =>
+        key => snapshot.FindTrack(key)?.UserRating is not null;
 
     /// <summary>D5: free space first without ever leaving a broken playlist line (M3 plan §5a).</summary>
     private async Task MakeRoomAsync(Run run)
@@ -889,6 +924,8 @@ public sealed class SyncEngine(
         /// <summary>Set once preflight passed; from then on, any failure saves the manifest before reporting.</summary>
         public bool Started { get; set; }
 
+        public StatsResult? Stats { get; set; }
+
         public bool Stopped { get; set; }
 
         public int Added { get; set; }
@@ -994,7 +1031,10 @@ public sealed class SyncEngine(
             logger.LogInformation("Sync finished: completed={Completed} added={Added} replaced={Replaced} retagged={Retagged} moved={Moved} removed={Removed} playlists={Playlists} failures={Failures}",
                 completed, Added, Replaced, Retagged, Moved, Removed, PlaylistsWritten, Failures.Count);
             return new SyncResult(completed, Stopped, Added, Replaced, Retagged, TagsAlreadyCurrent, Moved, Removed, PlaylistsWritten, PlaylistsRemoved,
-                BytesWritten, _clock.Elapsed, [.. Failures], [.. Warnings], report);
+                BytesWritten, _clock.Elapsed, [.. Failures], [.. Warnings], report)
+            {
+                Stats = Stats,
+            };
         }
 
         public async Task<ArtImages?> ArtAsync(AlbumDetail album)
@@ -1030,6 +1070,15 @@ public sealed class SyncEngine(
             b.AppendLine(completed ? "Result: completed" : Stopped ? "Result: stopped (safe to sync again)" : "Result: finished with problems");
             b.AppendLine(CultureInfo.InvariantCulture, $"Added {Added}, replaced {Replaced}, re-tagged {Retagged} ({TagsAlreadyCurrent} already current), moved {Moved}, removed {Removed}.");
             b.AppendLine(CultureInfo.InvariantCulture, $"Playlists written {PlaylistsWritten}, removed {PlaylistsRemoved}. {BytesWritten / 1048576.0:0.0} MB written, every file read back and verified.");
+            if (Stats is { Lines.Count: > 0 } sent)
+            {
+                b.AppendLine().AppendLine("Plays and ratings:");
+                foreach (var line in sent.Lines)
+                {
+                    b.AppendLine("  " + line);
+                }
+            }
+
             if (Failures.Count > 0)
             {
                 b.AppendLine().AppendLine("Problems:");

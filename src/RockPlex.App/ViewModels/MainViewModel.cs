@@ -68,6 +68,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             Export.ExportCommand.NotifyCanExecuteChanged();
             Sync.SyncCommand.NotifyCanExecuteChanged();
+            Sync.SendPlaysNowCommand.NotifyCanExecuteChanged();
         });
         _discovery = discovery;
         _clients = clients;

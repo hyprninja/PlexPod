@@ -2,6 +2,7 @@ using System.Text.Json.Nodes;
 using Microsoft.Extensions.Logging.Abstractions;
 using RockPlex.Core.Models;
 using RockPlex.Core.Selection;
+using RockPlex.Core.Stats;
 using RockPlex.Core.Sync;
 using RockPlex.Core.Tagging;
 using RockPlex.Device.Sync;
@@ -9,6 +10,7 @@ using RockPlex.Media;
 using RockPlex.Media.Art;
 using RockPlex.Media.Ffmpeg;
 using RockPlex.Media.Pipeline;
+using RockPlex.Media.Stats;
 using RockPlex.Media.Sync;
 using RockPlex.Media.Tags;
 
@@ -79,18 +81,19 @@ public sealed class SyncEngineTests : IDisposable
         var paths = new MediaPaths(_dir.File("cache"));
         var runner = TestFfmpeg.Runner;
         var pipeline = new TrackPipeline(paths, new ConversionCache(paths), new FlacConverter(runner), new ContainerCleaner(runner), new AudioVerifier(runner), NullLogger<TrackPipeline>.Instance);
-        return new SyncEngine(pipeline, new AlbumArtProvider(paths, NullLogger<AlbumArtProvider>.Instance), paths, new DeviceFileOps(), NullLogger<SyncEngine>.Instance)
+        return new SyncEngine(pipeline, new AlbumArtProvider(paths, NullLogger<AlbumArtProvider>.Instance), paths, new DeviceFileOps(),
+            new StatsService(paths, NullLogger<StatsService>.Instance) { Zone = TimeZoneInfo.Utc }, NullLogger<SyncEngine>.Instance)
         {
             FreeSpace = _ => free,
             Fingerprint = fingerprint ?? (_ => "test-ipod"),
         };
     }
 
-    private async Task<SyncRequest> RequestAsync(SelectionProfile profile, TagPolicy? policy = null)
+    private async Task<SyncRequest> RequestAsync(SelectionProfile profile, TagPolicy? policy = null, StatsOptions? stats = null)
     {
         var resolved = SelectionResolver.Resolve(_snapshot, profile, _contents);
         return new SyncRequest(_ipod, "IPOD", "ipodvideo", _client, await TestFfmpeg.InstallAsync(), _snapshot, resolved, _contents,
-            new Dictionary<string, AudioFormat>(), new Dictionary<string, long>(), policy ?? TagPolicy.Default, profile);
+            new Dictionary<string, AudioFormat>(), new Dictionary<string, long>(), policy ?? TagPolicy.Default, profile, stats);
     }
 
     private static SelectionProfile Select(bool albumA = true, bool albumB = false, bool playlist = false) =>
@@ -99,10 +102,10 @@ public sealed class SyncEngineTests : IDisposable
             [],
             [.. albumA ? [new ItemRef("alA", "g", "Takk...")] : Array.Empty<ItemRef>(), .. albumB ? [new ItemRef("alB", "g", "Blue")] : Array.Empty<ItemRef>()]);
 
-    private async Task<SyncResult> SyncAsync(SelectionProfile profile, long free = Plenty, TagPolicy? policy = null, CancellationToken stop = default)
+    private async Task<SyncResult> SyncAsync(SelectionProfile profile, long free = Plenty, TagPolicy? policy = null, CancellationToken stop = default, StatsOptions? stats = null)
     {
         var engine = Engine(free);
-        var preview = await engine.PreviewAsync(await RequestAsync(profile, policy), CancellationToken.None);
+        var preview = await engine.PreviewAsync(await RequestAsync(profile, policy, stats), CancellationToken.None);
         return await engine.ExecuteAsync(preview, null, stop);
     }
 
@@ -549,6 +552,163 @@ public sealed class SyncEngineTests : IDisposable
 
         Assert.True(result.Completed, string.Join("\n", result.Failures));
         Assert.True(File.Exists(Local("/Music/Joni/1971 - Blue/08 ...It's Just Wide-Open Field.mp3")));
+    }
+
+    // ---------------------------------------------------------------- M4: stats return
+
+    private const string PathA1 = "/Music/Sigur Rós/2005 - Takk/01 Glósóli.flac";
+    private const string PathA2 = "/Music/Sigur Rós/2005 - Takk/02 Hoppípolla.flac";
+    private const string PathB1 = "/Music/Joni/1971 - Blue/01 River.mp3";
+
+    private static readonly StatsOptions StatsOn = new(RatingMode.IpodWins);
+
+    private string RockboxFile(string name) => Path.Combine(_ipod, ".rockbox", name);
+
+    private void WriteLog(string name, params string[] lines) =>
+        File.WriteAllText(RockboxFile(name), "# Started Ver. 4.0 " + name + "\n" + string.Concat(lines.Select(l => l + "\n")));
+
+    private static string Play(string path, long elapsed = 200_000, long length = 200_000, long at = 1_760_000_000) => $"{at}:{elapsed}:{length}:{path}";
+
+    private StatsService Stats() => new(new MediaPaths(_dir.File("cache")), NullLogger<StatsService>.Instance) { Zone = TimeZoneInfo.Utc };
+
+    [FfmpegFact]
+    public async Task Stats_PlaysSentBeforeRemovals_IncludingTheRemovedTrack_AndRockboxFilesUntouched()
+    {
+        await LibraryAsync();
+        await SyncAsync(Select(albumA: true, albumB: true));
+        WriteLog("playback.log", Play(PathA1), Play(PathB1), Play(PathA2, elapsed: 10_000), Play("/Music/User Stuff/my own.mp3"));
+        var logBefore = File.ReadAllBytes(RockboxFile("playback.log"));
+        var logTime = File.GetLastWriteTimeUtc(RockboxFile("playback.log"));
+
+        var engine = Engine();
+        var preview = await engine.PreviewAsync(await RequestAsync(Select(albumA: true, albumB: false), stats: StatsOn), CancellationToken.None);
+        Assert.Equal(2, preview.Stats!.Plays);
+        Assert.Equal("2 plays", preview.Stats.Summary);
+        var result = await engine.ExecuteAsync(preview, null, CancellationToken.None);
+
+        Assert.True(result.Completed, string.Join("\n", result.Failures));
+        Assert.Equal(["play:t1", "play:t3"], _client.Writes);
+        Assert.False(File.Exists(Local(PathB1))); // removed in the same sync, after its play was sent
+        Assert.Equal(2, result.Stats!.PlaysSent);
+        Assert.Equal(1, result.Stats.TooShort);
+        Assert.Equal(1, result.Stats.NotOurs);
+        Assert.Contains("Sent 2 plays", result.Report, StringComparison.Ordinal);
+        Assert.Equal(logBefore, File.ReadAllBytes(RockboxFile("playback.log")));
+        Assert.Equal(logTime, File.GetLastWriteTimeUtc(RockboxFile("playback.log")));
+
+        var deviceId = (await new DeviceStore(_ipod).TryReadIdentityAsync(CancellationToken.None))!.DeviceId;
+        var history = File.ReadAllLines(Path.Combine(_dir.Path, "stats", deviceId, "plays.jsonl"));
+        Assert.Equal(2, history.Length);
+        Assert.Contains("\"playedAt\":\"2025-10-09T08:53:20+00:00\"", history[0], StringComparison.Ordinal);
+        Assert.Single(Directory.GetFiles(Path.Combine(_dir.Path, "stats", deviceId, "logs")));
+
+        // The same log again: nothing more is sent.
+        await SyncAsync(Select(albumA: true), stats: StatsOn);
+        Assert.Equal(2, _client.Writes.Count);
+        AssertUserFilesUntouched();
+    }
+
+    [FfmpegFact]
+    public async Task Stats_PlexDown_SyncStillRuns_AndPlaysAreSentNextTime()
+    {
+        await LibraryAsync();
+        await SyncAsync(Select(albumA: true, albumB: true));
+        WriteLog("playback.log", Play(PathA1), Play(PathB1));
+
+        _client.FailWrite = _ => _client.Writes.Count >= 1; // Plex goes away after the first play
+        var result = await SyncAsync(Select(albumA: true, albumB: true), stats: StatsOn);
+        Assert.True(result.Completed, string.Join("\n", result.Failures));
+        Assert.Equal(["play:t1"], _client.Writes);
+        Assert.Equal(1, result.Stats!.PlaysWaiting);
+        Assert.Contains("Couldn't reach Plex. 1 play will be sent next time.", result.Report, StringComparison.Ordinal);
+
+        _client.FailWrite = null;
+        File.AppendAllText(RockboxFile("playback.log"), Play(PathA2) + "\n");
+        await SyncAsync(Select(albumA: true, albumB: true), stats: StatsOn);
+        Assert.Equal(["play:t1", "play:t3", "play:t2"], _client.Writes);
+    }
+
+    [FfmpegFact]
+    public async Task Stats_RotatedLog_IsReadOnceInOrder()
+    {
+        await LibraryAsync();
+        await SyncAsync(Select(albumA: true, albumB: true));
+        WriteLog("playback.log", Play(PathA1));
+        await SyncAsync(Select(albumA: true, albumB: true), stats: StatsOn);
+
+        // Rockbox renamed the log at start-up (after one more play) and began a new one.
+        File.AppendAllText(RockboxFile("playback.log"), Play(PathB1) + "\n");
+        File.Move(RockboxFile("playback.log"), RockboxFile("playback_0001.log"));
+        WriteLog("playback.log", Play(PathA2));
+        await SyncAsync(Select(albumA: true, albumB: true), stats: StatsOn);
+
+        Assert.Equal(["play:t1", "play:t3", "play:t2"], _client.Writes);
+    }
+
+    [FfmpegFact]
+    public async Task Stats_Ratings_FromTheChangelog_SentOnceAndRespectTheSetting()
+    {
+        var (a1, a2, b1) = await LibraryAsync();
+        await SyncAsync(Select(albumA: true, albumB: true));
+        File.WriteAllText(RockboxFile("database_changelog.txt"),
+            $"## Changelog version 1\nfilename=\"{PathA1}\" rating=\"8\"\nfilename=\"{PathA2}\" rating=\"0\"\nfilename=\"{PathB1}\" rating=\"6\"\n");
+
+        SetLibrary([a1, a2, b1 with { UserRating = 4 }]);
+        await SyncAsync(Select(albumA: true, albumB: true), stats: new StatsOptions(RatingMode.FillGapsOnly));
+        Assert.Equal(["rate:t1=8"], _client.Writes); // B1 is rated in Plex; A2 was never rated
+
+        await SyncAsync(Select(albumA: true, albumB: true), stats: StatsOn);
+        Assert.Equal(["rate:t1=8", "rate:t3=6"], _client.Writes); // iPod wins now; t1 unchanged
+
+        await SyncAsync(Select(albumA: true, albumB: true), stats: StatsOn);
+        Assert.Equal(2, _client.Writes.Count);
+        Assert.Contains("rating=\"8\"", File.ReadAllText(RockboxFile("database_changelog.txt")), StringComparison.Ordinal);
+    }
+
+    [FfmpegFact]
+    public async Task Stats_Off_SendsNothing_AndWritesNoState()
+    {
+        await LibraryAsync();
+        await SyncAsync(Select(albumA: true));
+        WriteLog("playback.log", Play(PathA1));
+
+        var result = await SyncAsync(Select(albumA: true));
+
+        Assert.Null(result.Stats);
+        Assert.Empty(_client.Writes);
+        Assert.False(File.Exists(Path.Combine(_ipod, ".rockplex", "stats.json")));
+    }
+
+    [FfmpegFact]
+    public async Task Stats_NoLog_HintsAtLogging()
+    {
+        await LibraryAsync();
+        await SyncAsync(Select(albumA: true));
+        var result = await SyncAsync(Select(albumA: true), stats: StatsOn);
+        Assert.Contains("Playback Settings → Logging", result.Report, StringComparison.Ordinal);
+    }
+
+    [FfmpegFact]
+    public async Task SendPlaysNow_SendsWithoutSyncing_AndTheNextSyncDoesntResend()
+    {
+        await LibraryAsync();
+        var none = await Stats().SendNowAsync(_ipod, _client, StatsOn, _ => false, CancellationToken.None);
+        Assert.Contains("hasn't synced this iPod", Assert.Single(none.Lines), StringComparison.Ordinal);
+
+        await SyncAsync(Select(albumA: true));
+        WriteLog("playback.log", Play(PathA1), Play(PathA2));
+        var engine = Engine();
+        var preview = await engine.PreviewAsync(await RequestAsync(Select(albumA: true), stats: StatsOn), CancellationToken.None);
+        Assert.Equal(2, preview.Stats!.Plays);
+
+        var now = await Stats().SendNowAsync(_ipod, _client, StatsOn, _ => false, CancellationToken.None);
+        Assert.Equal(2, now.PlaysSent);
+
+        // The plan made before Send plays now still says 2, but the sync re-reads and sends none.
+        var result = await engine.ExecuteAsync(preview, null, CancellationToken.None);
+        Assert.Equal(0, result.Stats!.PlaysSent);
+        Assert.Equal(["play:t1", "play:t2"], _client.Writes);
+        Assert.Equal("No new plays or ratings on the iPod.", Assert.Single((await Stats().SendNowAsync(_ipod, _client, StatsOn, _ => false, CancellationToken.None)).Lines));
     }
 
     private static void CopyTree(string from, string to)

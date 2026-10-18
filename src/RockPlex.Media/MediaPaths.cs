@@ -21,4 +21,7 @@ public sealed class MediaPaths
     public string Converted => Path.Combine(CacheRoot, "converted");
 
     public string ArtCache => Path.Combine(CacheRoot, "art");
+
+    /// <summary>Play history per iPod (M4), next to the cache rather than in it: clearing the cache must not lose it.</summary>
+    public string StatsArchive => Path.Combine(Path.GetDirectoryName(Path.GetFullPath(CacheRoot))!, "stats");
 }

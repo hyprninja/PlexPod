@@ -86,6 +86,9 @@ internal sealed class MetadataDto
     public int? ParentIndex { get; set; }
     public long? Duration { get; set; }
     public long? UpdatedAt { get; set; }
+
+    /// <summary>The signed-in user's rating, 0–10; absent when unrated.</summary>
+    public double? UserRating { get; set; }
     public int? Year { get; set; }
     public string? OriginallyAvailableAt { get; set; }
     public string? Studio { get; set; }

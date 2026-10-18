@@ -4,6 +4,7 @@ using RockPlex.Core.Sync;
 using RockPlex.Core.Tagging;
 using RockPlex.Device.Sync;
 using RockPlex.Media.Ffmpeg;
+using RockPlex.Media.Stats;
 using RockPlex.Plex.Library;
 
 namespace RockPlex.Media.Sync;
@@ -21,7 +22,8 @@ public sealed record SyncRequest(
     IReadOnlyDictionary<string, AudioFormat> FormatOverrides,
     IReadOnlyDictionary<string, long> KnownSizes,
     TagPolicy Policy,
-    SelectionProfile Profile);
+    SelectionProfile Profile,
+    StatsOptions? Stats = null);
 
 /// <summary>The read-only look before a sync: what will happen, whether it fits, and anything blocking it.</summary>
 public sealed record SyncPreview(
@@ -42,6 +44,9 @@ public sealed record SyncPreview(
 
     /// <summary>Files known not to be RockPlex's, saved to the iPod so the next plan can skip their tags.</summary>
     public IReadOnlyList<ScannedFile> NotOurs { get; init; } = [];
+
+    /// <summary>Plays and ratings waiting to go to Plex (M4); null when stats return is off.</summary>
+    public StatsPreview? Stats { get; init; }
 
     public bool CanStart => Blockers.Count == 0 && Fit.Outcome != FitOutcome.TooBig;
 
@@ -73,7 +78,11 @@ public sealed record SyncResult(
     TimeSpan Elapsed,
     IReadOnlyList<string> Failures,
     IReadOnlyList<string> Warnings,
-    string Report);
+    string Report)
+{
+    /// <summary>What step 0 sent to Plex; null when stats return is off or the sync stopped before it.</summary>
+    public StatsResult? Stats { get; init; }
+}
 
 /// <summary>The iPod disappeared mid-sync. The journaled manifest lets the next sync resume.</summary>
 public sealed class DeviceGoneException(string message, Exception? inner = null) : IOException(message, inner);

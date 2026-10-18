@@ -13,7 +13,10 @@ public sealed record MusicSection(string Key, string Title, string? Uuid);
 /// <summary>A track's full metadata: stream details plus the MusicBrainz track ID when Plex has one.</summary>
 public sealed record PlexTrackDetail(TrackItem Track, string? MusicBrainzTrackId);
 
-/// <summary>Read-only access to one server's music library.</summary>
+/// <summary>
+/// Access to one server's music library: read-only, except <see cref="ScrobbleAsync"/> and
+/// <see cref="RateAsync"/> (M4 stats return), the only writes RockPlex ever makes to Plex.
+/// </summary>
 public interface IPlexLibraryClient
 {
     PlexServerConnection Connection { get; }
@@ -45,6 +48,12 @@ public interface IPlexLibraryClient
 
     /// <summary>Full-size bytes of an image path such as an album <c>thumb</c>.</summary>
     Task<byte[]> DownloadImageAsync(string imagePath, CancellationToken ct);
+
+    /// <summary>Adds one play to a track (Plex sets its last-played time to now).</summary>
+    Task ScrobbleAsync(string ratingKey, CancellationToken ct);
+
+    /// <summary>Sets a track's rating, 0–10; -1 clears it.</summary>
+    Task RateAsync(string ratingKey, double rating, CancellationToken ct);
 }
 
 public interface IPlexLibraryClientFactory
@@ -78,7 +87,11 @@ public sealed class PlexLibraryClient(
     private const int AlbumType = 9;
     private const int TrackType = 10;
 
+    private const string LibraryIdentifier = "com.plexapp.plugins.library";
+
     private static readonly TimeSpan MetadataTimeout = TimeSpan.FromSeconds(100);
+
+    private static readonly TimeSpan WriteTimeout = TimeSpan.FromSeconds(30);
 
     public PlexServerConnection Connection => connection;
 
@@ -216,6 +229,37 @@ public sealed class PlexLibraryClient(
         }
 
         return buffer.ToArray();
+    }
+
+    public Task ScrobbleAsync(string ratingKey, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(ratingKey);
+        return WriteAsync(HttpMethod.Get, "/:/scrobble", $"?key={Uri.EscapeDataString(ratingKey)}&identifier={LibraryIdentifier}", ct);
+    }
+
+    public Task RateAsync(string ratingKey, double rating, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(ratingKey);
+        if (rating != -1 && rating is < 0 or > 10)
+        {
+            throw new ArgumentOutOfRangeException(nameof(rating), rating, "Ratings are 0–10, or -1 to clear.");
+        }
+
+        var value = rating.ToString("0.#", CultureInfo.InvariantCulture);
+        return WriteAsync(HttpMethod.Put, "/:/rate", $"?key={Uri.EscapeDataString(ratingKey)}&identifier={LibraryIdentifier}&rating={value}", ct);
+    }
+
+    /// <summary>A write is sent once: never retried, so a dropped connection can't count a play twice.</summary>
+    private async Task WriteAsync(HttpMethod method, string path, string query, CancellationToken ct)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(WriteTimeout);
+        using var request = CreateRequest(path, query);
+        request.Method = method;
+        request.Options.Set(TransientRetryHandler.NoRetry, true);
+        logger.LogInformation("{Method} {Uri}", method, PlexRedactor.Redact(request.RequestUri));
+        using var response = await http.SendAsync(request, timeout.Token).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
     }
 
     private async Task<MetadataDto?> GetMetadataAsync(string ratingKey, string query, CancellationToken ct)

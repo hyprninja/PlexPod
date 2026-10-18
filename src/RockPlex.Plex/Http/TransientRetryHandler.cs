@@ -12,12 +12,16 @@ public sealed class TransientRetryHandler(ILogger<TransientRetryHandler> logger)
 {
     public const int MaxRetries = 2;
 
+    /// <summary>Set on a GET that must not be repeated (a scrobble counts a play).</summary>
+    public static readonly HttpRequestOptionsKey<bool> NoRetry = new("RockPlex.NoRetry");
+
     /// <summary>Delay before retry n is n × this.</summary>
     public TimeSpan BaseDelay { get; init; } = TimeSpan.FromMilliseconds(500);
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
-        var idempotent = request.Method == HttpMethod.Get || request.Method == HttpMethod.Head;
+        var idempotent = (request.Method == HttpMethod.Get || request.Method == HttpMethod.Head)
+            && !(request.Options.TryGetValue(NoRetry, out var noRetry) && noRetry);
         for (var attempt = 0; ; attempt++)
         {
             try

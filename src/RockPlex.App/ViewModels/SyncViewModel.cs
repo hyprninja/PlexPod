@@ -11,6 +11,7 @@ using RockPlex.Core.Selection;
 using RockPlex.Core.Sync;
 using RockPlex.Device.Sync;
 using RockPlex.Media;
+using RockPlex.Media.Stats;
 using RockPlex.Media.Sync;
 
 namespace RockPlex.App.ViewModels;
@@ -23,10 +24,12 @@ public interface ISyncConfirmation
 
 /// <summary>
 /// The Sync button (M3): preview (read-only) → confirm → execute with progress and a safe Stop.
-/// Also reads what RockPlex already owns on the iPod, so the capacity bar counts it as available.
+/// Also reads what RockPlex already owns on the iPod, so the capacity bar counts it as available,
+/// and offers Send plays now (M4).
 /// </summary>
 public sealed partial class SyncViewModel(
     SyncEngine engine,
+    StatsService stats,
     LibraryState library,
     SettingsViewModel settings,
     DeviceViewModel device,
@@ -70,6 +73,7 @@ public sealed partial class SyncViewModel(
         _profile = profile;
         HasSelection = selection.TrackCount > 0 || selection.PlaylistKeys.Count > 0;
         SyncCommand.NotifyCanExecuteChanged(); // also depends on the library and the device
+        SendPlaysNowCommand.NotifyCanExecuteChanged();
         UpdateDeviceSelectionHint();
     }
 
@@ -77,6 +81,7 @@ public sealed partial class SyncViewModel(
     public async Task RefreshDeviceAsync()
     {
         SyncCommand.NotifyCanExecuteChanged();
+        SendPlaysNowCommand.NotifyCanExecuteChanged();
         if (device.SelectedDevice is not { } connected)
         {
             ManagedBytes = 0;
@@ -134,7 +139,7 @@ public sealed partial class SyncViewModel(
         ProgressValue = 0;
         ProgressText = "Planning the sync (reading the iPod, comparing with Plex)…";
         var request = new SyncRequest(ipod.DriveRoot, ipod.VolumeLabel, ipod.RockboxTarget, client, ffmpeg, snapshot, _selection,
-            library.PlaylistContents, library.FormatOverrides, library.KnownSizes, settings.Policy, _profile);
+            library.PlaylistContents, library.FormatOverrides, library.KnownSizes, settings.Policy, _profile, settings.StatsOptions);
 
         SyncPreview preview;
         try
@@ -154,9 +159,11 @@ public sealed partial class SyncViewModel(
             return;
         }
 
-        if (!confirmation.Confirm(preview.Plan.IsEmpty ? "Already in sync" : "Ready to sync", Summarise(preview), preview.CanStart && !preview.Plan.IsEmpty))
+        // Plays waiting are reason enough to run a sync whose plan is otherwise empty.
+        var nothingToDo = preview.Plan.IsEmpty && preview.Stats is null or { Plan.IsEmpty: true };
+        if (!confirmation.Confirm(nothingToDo ? "Already in sync" : "Ready to sync", Summarise(preview), preview.CanStart && !nothingToDo))
         {
-            ProgressText = preview.Plan.IsEmpty ? "The iPod already matches your selection." : "Sync cancelled; nothing was changed.";
+            ProgressText = nothingToDo ? "The iPod already matches your selection." : "Sync cancelled; nothing was changed.";
             return;
         }
 
@@ -170,11 +177,12 @@ public sealed partial class SyncViewModel(
         {
             var result = await Task.Run(() => engine.ExecuteAsync(preview, progress, stop), CancellationToken.None);
             ProgressValue = 1;
-            ProgressText = result.Completed
+            ProgressText = (result.Completed
                 ? $"Sync complete: {result.Added:N0} added, {result.Retagged + result.Replaced:N0} updated, {result.Removed:N0} removed, {result.PlaylistsWritten:N0} playlists written ({Format.Bytes(result.BytesWritten)}, {result.Elapsed:mm\\:ss}). Run Database → Update Now on the iPod."
                 : result.Stopped
                     ? "Sync stopped. The iPod is consistent; press Sync again to finish."
-                    : $"Sync finished with {result.Failures.Count:N0} problem(s). Details: /.rockplex/{SyncEngine.ReportFileName} on the iPod.";
+                    : $"Sync finished with {result.Failures.Count:N0} problem(s). Details: /.rockplex/{SyncEngine.ReportFileName} on the iPod.")
+                + StatsNote(result.Stats);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or HttpRequestException)
         {
@@ -187,6 +195,49 @@ public sealed partial class SyncViewModel(
             Finished?.Invoke(this, EventArgs.Empty);
         }
     }
+
+    private bool CanSendPlays() => device.SelectedDevice is not null && library.Client is not null && library.Snapshot is not null && gate.IsFree;
+
+    /// <summary>D11: send plays and ratings from the iPod now, without syncing.</summary>
+    [RelayCommand(CanExecute = nameof(CanSendPlays))]
+    private async Task SendPlaysNowAsync()
+    {
+        if (library.Client is not { } client || library.Snapshot is not { } snapshot || device.SelectedDevice is not { } ipod)
+        {
+            return;
+        }
+
+        using var lease = gate.TryEnter("Sending plays");
+        if (lease is null)
+        {
+            ProgressText = $"Wait for the {gate.Holder?.ToLowerInvariant()} to finish first.";
+            return;
+        }
+
+        ProgressValue = 0;
+        ProgressText = "Reading plays on the iPod…";
+        var options = new StatsOptions(settings.RatingMode);
+        var hasRating = SyncEngine.PlexHasRating(snapshot);
+        var sending = new Progress<(int Done, int Total)>(p => ProgressText = $"Sending to Plex: {p.Done:N0} of {p.Total:N0}…");
+        try
+        {
+            var result = await Task.Run(() => stats.SendNowAsync(ipod.DriveRoot, client, options, hasRating, CancellationToken.None, sending));
+            ProgressText = string.Join(" ", result.Lines);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            logger.LogError(ex, "Send plays now failed");
+            ProgressText = $"Couldn't read the iPod: {ex.Message}";
+        }
+    }
+
+    private static string StatsNote(StatsResult? stats) => stats switch
+    {
+        null => string.Empty,
+        { Error: { } error } => $" {error} {StatsService.Describe(stats.PlaysWaiting, stats.RatingsWaiting)} will be sent next time.",
+        { PlaysSent: > 0 } or { RatingsSent: > 0 } => $" Sent {StatsService.Describe(stats.PlaysSent, stats.RatingsSent)} to Plex.",
+        _ => string.Empty,
+    };
 
     [RelayCommand]
     private void LoadDeviceSelection()
@@ -230,6 +281,19 @@ public sealed partial class SyncViewModel(
 
         if (preview.Blockers.Count > 0)
         {
+            b.AppendLine();
+        }
+
+        if (preview.Stats is { } stats)
+        {
+            b.AppendLine(stats.Summary is { } what
+                ? $"First: send {what} from the iPod to Plex."
+                : "No new plays or ratings on the iPod to send to Plex.");
+            foreach (var hint in stats.Hints)
+            {
+                b.AppendLine("ℹ " + hint);
+            }
+
             b.AppendLine();
         }
 

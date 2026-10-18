@@ -3,7 +3,7 @@
     "ratingKey": "48211", "key": "/library/metadata/48211", "guid": "plex://track/5d07cdd5", "type": "track",
     "title": "Hoppípolla", "parentRatingKey": "5530", "grandparentRatingKey": "1021",
     "parentTitle": "Takk...", "grandparentTitle": "Sigur Rós", "originalTitle": "Sigur Rós feat. Amiina",
-    "index": 2, "parentIndex": 1, "duration": 268000, "updatedAt": 1700000000,
+    "index": 2, "parentIndex": 1, "duration": 268000, "updatedAt": 1700000000, "userRating": 8.0,
     "Media": [ { "id": 1, "duration": 268000, "bitrate": 1950, "audioChannels": 2, "audioCodec": "flac", "container": "flac",
       "Part": [ { "id": 9001, "key": "/library/parts/9001/1700000000/file.flac", "file": "/music/Sigur Ros/Takk/02.flac", "size": 65400000, "container": "flac" } ] } ]
   },

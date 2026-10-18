@@ -34,6 +34,16 @@ public sealed class TransientRetryHandlerTests
     }
 
     [Fact]
+    public async Task Get_MarkedNoRetry_IsSentOnce()
+    {
+        var fake = new FakeHttpHandler(_ => throw Reset());
+        using var request = new HttpRequestMessage(HttpMethod.Get, new Uri("http://server:32400/:/scrobble?key=1"));
+        request.Options.Set(TransientRetryHandler.NoRetry, true);
+        await Assert.ThrowsAsync<HttpRequestException>(() => Client(fake).SendAsync(request));
+        Assert.Single(fake.Requests);
+    }
+
+    [Fact]
     public async Task Post_IsNeverRetried()
     {
         var fake = new FakeHttpHandler(_ => throw Reset());

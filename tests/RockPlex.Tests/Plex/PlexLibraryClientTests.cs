@@ -24,6 +24,47 @@ public sealed class PlexLibraryClientTests
             (Microsoft.Extensions.Logging.ILogger<PlexLibraryClient>?)logger ?? NullLogger<PlexLibraryClient>.Instance);
 
     [Fact]
+    public async Task Scrobble_SendsExactlyTheDocumentedRequest()
+    {
+        var fake = new FakeHttpHandler(_ => Status(System.Net.HttpStatusCode.OK));
+        await Create(fake).ScrobbleAsync("48211", CancellationToken.None);
+        var request = Assert.Single(fake.Requests);
+        Assert.Equal(HttpMethod.Get, request.Method);
+        Assert.Equal("http://192.168.1.20:32400/:/scrobble?key=48211&identifier=com.plexapp.plugins.library", request.Uri.ToString());
+        Assert.Equal(ServerToken, request.Headers["X-Plex-Token"]);
+    }
+
+    [Theory]
+    [InlineData(8, "8")]
+    [InlineData(0, "0")]
+    [InlineData(-1, "-1")]
+    public async Task Rate_SendsExactlyTheDocumentedRequest(double rating, string sent)
+    {
+        var fake = new FakeHttpHandler(_ => Status(System.Net.HttpStatusCode.OK));
+        await Create(fake).RateAsync("48211", rating, CancellationToken.None);
+        var request = Assert.Single(fake.Requests);
+        Assert.Equal(HttpMethod.Put, request.Method);
+        Assert.Equal($"http://192.168.1.20:32400/:/rate?key=48211&identifier=com.plexapp.plugins.library&rating={sent}", request.Uri.ToString());
+        Assert.Equal(ServerToken, request.Headers["X-Plex-Token"]);
+    }
+
+    [Fact]
+    public async Task Rate_OutOfRange_SendsNothing()
+    {
+        var fake = new FakeHttpHandler(_ => Status(System.Net.HttpStatusCode.OK));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => Create(fake).RateAsync("1", 11, CancellationToken.None));
+        Assert.Empty(fake.Requests);
+    }
+
+    [Fact]
+    public async Task Scrobble_ServerError_Throws_AndKeyIsEscaped()
+    {
+        var fake = new FakeHttpHandler(_ => Status(System.Net.HttpStatusCode.InternalServerError));
+        await Assert.ThrowsAsync<HttpRequestException>(() => Create(fake).ScrobbleAsync("1&rating=0", CancellationToken.None));
+        Assert.Contains("key=1%26rating%3D0&", Assert.Single(fake.Requests).Uri.AbsoluteUri);
+    }
+
+    [Fact]
     public async Task Sections_KeepsOnlyMusic()
     {
         var fake = new FakeHttpHandler(_ => Fixture("sections.json"));
@@ -53,6 +94,8 @@ public sealed class PlexLibraryClientTests
         Assert.Equal(1, flac.DiscIndex);
         Assert.Equal(268_000, flac.DurationMs);
         Assert.Equal(1_700_000_000, flac.UpdatedAt);
+        Assert.Equal(8.0, flac.UserRating);
+        Assert.Null(tracks[1].UserRating);
         Assert.Equal(new AudioFormat("flac", "flac", 1950, null, null, 2), flac.Format);
         var part = Assert.Single(flac.Parts);
         Assert.Equal(new MediaPartRef(9001, "/library/parts/9001/1700000000/file.flac", 65_400_000, "flac"), part);

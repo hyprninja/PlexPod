@@ -3,6 +3,7 @@ using RockPlex.Media.Art;
 using RockPlex.Media.Ffmpeg;
 using RockPlex.Device.Sync;
 using RockPlex.Media.Pipeline;
+using RockPlex.Media.Stats;
 using RockPlex.Media.Sync;
 
 namespace RockPlex.Media;
@@ -23,6 +24,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<TrackPipeline>();
         services.AddSingleton<TestExportService>();
         services.AddSingleton<DeviceFileOps>();
+        services.AddSingleton<StatsService>();
         services.AddSingleton<SyncEngine>();
         services.AddSingleton<OperationGate>();
         return services;
