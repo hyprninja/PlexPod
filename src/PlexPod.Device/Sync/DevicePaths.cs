@@ -16,7 +16,7 @@ public static class DevicePaths
     /// The only folders PlexPod ever writes to or deletes from (besides <c>/.plexpod</c>): Rockbox's
     /// <c>/Music</c> and <c>/Playlists</c>, and the stock firmware's music folders.
     /// </summary>
-    public static readonly IReadOnlyList<string> ManagedRoots = ["/Music/", "/Playlists/", "/iPod_Control/Music/"];
+    public static readonly IReadOnlyList<string> ManagedRoots = ["/Music/", "/Playlists/", "/iPod_Control/Music/", "/iPod_Control/Artwork/"];
 
     public const string ItunesDbPath = "/iPod_Control/iTunes/iTunesDB";
 

@@ -252,9 +252,9 @@ public static class ItunesDbWriter
         w.U8(0);                                // checked
         w.U8(0);                                // app rating
         w.U16(0);                               // BPM
-        w.U16(0);                               // artwork count
+        w.U16(t.ArtworkId > 0 ? (ushort)1 : (ushort)0); // artwork count
         w.U16(unk126);
-        w.U32(0);                               // 0x80 artwork size
+        w.U32(t.ArtworkId > 0 ? t.ArtworkSize : 0);   // 0x80 artwork size
         w.U32(0);
         w.F32(t.SampleRate);
         w.U32(0);                               // release date
@@ -264,7 +264,7 @@ public static class ItunesDbWriter
         w.U32(0);
         w.U32(t.SkipCount);
         w.U32(ToMacTime(t.LastSkipped));        // 0xA0
-        w.U8(2);                                // has artwork: 2 = no
+        w.U8(t.ArtworkId > 0 ? (byte)1 : (byte)2); // has artwork: 1 = yes, 2 = no
         w.U8(0);                                // skip when shuffling
         w.U8(0);                                // remember position
         w.U8(0);
@@ -300,7 +300,7 @@ public static class ItunesDbWriter
         w.Zeros(8);                             // 0x140
         w.U32(0);
         w.Zeros(20);
-        w.U32(0);                               // 0x160 artwork link (Phase 6)
+        w.U32(t.ArtworkId);                     // 0x160 mhii link: the cover's image id in the ArtworkDB
         w.U32(0);
         w.U32(1);
         w.U32(0);

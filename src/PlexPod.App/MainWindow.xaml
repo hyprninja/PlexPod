@@ -203,7 +203,7 @@
                 <Button DockPanel.Dock="Right" Content="Test export…" Command="{Binding Export.ExportCommand}" Margin="0,0,8,0"
                         ToolTip="Process the selection into a folder on this PC (converted, re-tagged, with art) to check before syncing." />
                 <Button DockPanel.Dock="Right" Content="Send plays now" Command="{Binding Sync.SendPlaysNowCommand}" Margin="0,0,8,0"
-                        ToolTip="Send plays and ratings recorded on the iPod to Plex, without syncing. Every sync does this first anyway." />
+                        ToolTip="Send plays and ratings recorded on the iPod to Plex, without syncing (Rockbox). Every sync does this first anyway, and on Apple's firmware only a sync can." ToolTipService.ShowOnDisabled="True" />
                 <ProgressBar DockPanel.Dock="Left" Width="80" Height="4" IsIndeterminate="True" Margin="0,0,10,0"
                              Visibility="{Binding IsBusy, Converter={StaticResource VisibleWhen}}" />
                 <TextBlock Text="{Binding StatusText}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Opacity="0.8" />

@@ -83,6 +83,12 @@ public sealed record ItdbTrack
     public bool GaplessTrack { get; init; }
 
     public bool GaplessAlbum { get; init; }
+
+    /// <summary>The track's cover in the ArtworkDB (its <c>mhii</c> image id), or 0 for none. Set when the database is built.</summary>
+    public uint ArtworkId { get; init; }
+
+    /// <summary>Size of the source image, recorded beside the artwork link.</summary>
+    public uint ArtworkSize { get; init; }
 }
 
 /// <summary>The audio formats the stock firmware plays, with the bytes and strings it expects for each.</summary>

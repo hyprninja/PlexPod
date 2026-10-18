@@ -67,7 +67,7 @@ public sealed class SyncEngine(
 
         progress?.Report("Listing files on the iPod…");
         var stock = request.Firmware == IpodFirmware.Stock;
-        string[] folders = stock ? ["iPod_Control/Music", "Music", "Playlists"] : ["Music", "Playlists"];
+        string[] folders = stock ? ["iPod_Control/Music", "iPod_Control/Artwork", "Music", "Playlists"] : ["Music", "Playlists"];
         var listing = await Task.Run(() => DeviceFileOps.ListFiles(root, folders), ct).ConfigureAwait(false);
         manifest = Reconcile(manifest, listing, notes);
         var owned = OwnedPaths(manifest);
@@ -603,6 +603,13 @@ public sealed class SyncEngine(
             previous,
             failures,
             warnings);
+        StockArtwork? artwork = null;
+        if (!interim)
+        {
+            artwork = await WriteStockArtworkAsync(run, library).ConfigureAwait(false);
+            library = artwork?.Library ?? library;
+        }
+
         var bytes = ItunesDbWriter.Write(library);
         ItunesDbReader.Read(bytes); // never put a database on the iPod that doesn't read back
 
@@ -618,6 +625,13 @@ public sealed class SyncEngine(
             TryDelete(temp);
         }
 
+        // Thumbnail files the new ArtworkDB no longer uses (the previous index) go only now.
+        foreach (var stale in run.State.Extras.Values.Where(e => e.Kind == "artwork" && artwork is not null && !artwork.InUse.Contains(e.DevicePath)).ToList())
+        {
+            DeviceFileOps.Delete(run.Root, stale.DevicePath);
+            run.State.Extras.Remove(stale.DevicePath);
+        }
+
         run.Warnings.AddRange(warnings);
         if (!interim)
         {
@@ -630,6 +644,179 @@ public sealed class SyncEngine(
 
         await run.SaveAsync().ConfigureAwait(false);
     }
+
+    private const string ArtworkFolder = "/iPod_Control/Artwork/";
+
+    /// <summary>The library with cover links set, and the artwork files the new ArtworkDB uses.</summary>
+    private sealed record StockArtwork(ItdbLibrary Library, IReadOnlySet<string> InUse);
+
+    /// <summary>
+    /// D15: covers for the stock firmware (M6 plan §4.4). Thumbnails are made per album from the cached
+    /// cover, written per track in database order (this iPod has no shared artwork), into the other
+    /// file index whenever they change, so the ArtworkDB on the iPod never points into a half-written
+    /// file. Art never fails a sync: on any problem the library goes on without covers.
+    /// </summary>
+    private async Task<StockArtwork?> WriteStockArtworkAsync(Run run, ItdbLibrary library)
+    {
+        run.Report("Writing album art", 0, library.Tracks.Count, string.Empty);
+        var staging = Directory.CreateDirectory(Path.Combine(paths.CacheRoot, "sync-staging")).FullName;
+        var formats = ArtworkFormat.IpodVideo;
+        var temps = formats.ToDictionary(f => f.FormatId, f => Path.Combine(staging, Guid.NewGuid().ToString("N") + ".ithmb"));
+        try
+        {
+            var keyByDbid = run.State.Tracks.Values.Where(t => t.Stock is not null)
+                .GroupBy(t => t.Stock!.Dbid).ToDictionary(g => g.Key, g => g.First().RatingKey);
+            var thumbsByAlbum = new Dictionary<string, (byte[] Source, (byte[] Pixels, int Width, int Height, int HorizontalPadding, int VerticalPadding)[] Thumbs)?>(StringComparer.Ordinal);
+            var placed = new List<(int Track, uint SourceSize, int Offset)>();
+            var streams = formats.ToDictionary(f => f.FormatId, f => new FileStream(temps[f.FormatId], FileMode.Create, FileAccess.Write));
+            var perAlbumThumbs = new Dictionary<int, (byte[] Pixels, int Width, int Height, int HorizontalPadding, int VerticalPadding)[]>();
+            try
+            {
+                for (var i = 0; i < library.Tracks.Count; i++)
+                {
+                    var albumKey = keyByDbid.TryGetValue(library.Tracks[i].Dbid, out var ratingKey)
+                        ? (run.Preview.Request.Snapshot.FindTrack(ratingKey) ?? PlaylistTrack(run, ratingKey))?.AlbumKey
+                        : null;
+                    if (albumKey is null)
+                    {
+                        continue;
+                    }
+
+                    if (!thumbsByAlbum.TryGetValue(albumKey, out var art))
+                    {
+                        art = null;
+                        var images = await run.ArtAsync(run.AlbumFromSnapshot(albumKey)).ConfigureAwait(false);
+                        if (images is not null)
+                        {
+                            try
+                            {
+                                art = (images.CoverJpeg, formats.Select(f => ArtProcessor.ToRgb565(images.CoverJpeg, f.Width, f.Height)).ToArray());
+                            }
+                            catch (Exception ex) when (ex is InvalidDataException or NotSupportedException or System.Runtime.InteropServices.COMException or ArgumentException)
+                            {
+                                logger.LogWarning("Cover for album {Album} couldn't be made into iPod thumbnails: {Message}", albumKey, ex.Message);
+                            }
+                        }
+
+                        thumbsByAlbum[albumKey] = art;
+                    }
+
+                    if (art is not { } cover)
+                    {
+                        continue;
+                    }
+
+                    // This iPod reads a separate copy per track (no shared artwork), at the same offset in every size's file.
+                    var offset = placed.Count;
+                    for (var f = 0; f < formats.Count; f++)
+                    {
+                        await streams[formats[f].FormatId].WriteAsync(cover.Thumbs[f].Pixels).ConfigureAwait(false);
+                    }
+
+                    placed.Add((i, (uint)cover.Source.Length, offset));
+                    perAlbumThumbs[i] = cover.Thumbs;
+                }
+            }
+            finally
+            {
+                foreach (var stream in streams.Values)
+                {
+                    await stream.DisposeAsync().ConfigureAwait(false);
+                }
+            }
+
+            // Reuse a format's current file when its bytes are unchanged; otherwise write the other index.
+            var chosen = new Dictionary<int, (string DevicePath, bool Write, string Sha)>();
+            foreach (var format in formats)
+            {
+                string sha;
+                var pixels = File.OpenRead(temps[format.FormatId]);
+                await using (pixels.ConfigureAwait(false))
+                {
+                    sha = Convert.ToHexStringLower(await System.Security.Cryptography.SHA256.HashDataAsync(pixels).ConfigureAwait(false));
+                }
+
+                var current = run.State.Extras.Values.FirstOrDefault(e => e.Kind == "artwork"
+                    && (e.DevicePath == ArtworkFolder + format.FileName(1) || e.DevicePath == ArtworkFolder + format.FileName(2)));
+                if (current is not null && current.Sha256 == sha && File.Exists(DevicePaths.ToLocal(run.Root, current.DevicePath)))
+                {
+                    chosen[format.FormatId] = (current.DevicePath, false, sha);
+                }
+                else
+                {
+                    var index = current?.DevicePath == ArtworkFolder + format.FileName(1) ? 2 : 1;
+                    chosen[format.FormatId] = (ArtworkFolder + format.FileName(index), true, sha);
+                }
+            }
+
+            var entries = new List<ArtworkEntry>();
+            var tracks = library.Tracks.ToArray();
+            foreach (var (track, sourceSize, offset) in placed)
+            {
+                var id = ArtworkDb.FirstImageId + (uint)entries.Count;
+                var thumbs = formats.Select((f, n) =>
+                {
+                    var t = perAlbumThumbs[track][n];
+                    return new ArtworkThumb(f.FormatId, Path.GetFileName(chosen[f.FormatId].DevicePath), (uint)(offset * f.ImageBytes), (uint)f.ImageBytes,
+                        (ushort)t.Width, (ushort)t.Height, (ushort)t.HorizontalPadding, (ushort)t.VerticalPadding);
+                }).ToList();
+                entries.Add(new ArtworkEntry(id, tracks[track].Dbid, sourceSize, thumbs));
+                tracks[track] = tracks[track] with { ArtworkId = id, ArtworkSize = sourceSize };
+            }
+
+            var artworkDb = ArtworkDb.Write(entries, formats);
+            ArtworkDb.Read(artworkDb); // reads back, or nothing goes on the iPod
+
+            foreach (var format in formats)
+            {
+                var (devicePath, write, sha) = chosen[format.FormatId];
+                if (write)
+                {
+                    await files.CopyVerifiedAsync(temps[format.FormatId], run.Root, devicePath, CancellationToken.None).ConfigureAwait(false);
+                    run.State.Extras[devicePath] = new ManifestExtra(devicePath, "artwork", sha, ArtworkFolder.TrimEnd('/'));
+                }
+            }
+
+            var dbPath = ArtworkFolder + "ArtworkDB";
+            var dbSha = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(artworkDb));
+            if (run.State.Extras.GetValueOrDefault(dbPath)?.Sha256 != dbSha || !File.Exists(DevicePaths.ToLocal(run.Root, dbPath)))
+            {
+                var temp = Path.Combine(staging, Guid.NewGuid().ToString("N") + ".artdb");
+                await File.WriteAllBytesAsync(temp, artworkDb).ConfigureAwait(false);
+                try
+                {
+                    await files.CopyVerifiedAsync(temp, run.Root, dbPath, CancellationToken.None).ConfigureAwait(false);
+                }
+                finally
+                {
+                    TryDelete(temp);
+                }
+
+                run.State.Extras[dbPath] = new ManifestExtra(dbPath, "artwork", dbSha, ArtworkFolder.TrimEnd('/'));
+            }
+
+            await run.SaveAsync().ConfigureAwait(false);
+            var inUse = chosen.Values.Select(c => c.DevicePath).Append(dbPath).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            return new StockArtwork(library with { Tracks = tracks }, inUse);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ItunesDbFormatException or DeviceVerifyException
+                                   && Directory.Exists(run.Root))
+        {
+            logger.LogWarning(ex, "Album art for the iPod's library failed");
+            run.Warnings.Add($"Album art couldn't be written ({ex.Message}); the library is written without covers this time.");
+            return null;
+        }
+        finally
+        {
+            foreach (var temp in temps.Values)
+            {
+                TryDelete(temp);
+            }
+        }
+    }
+
+    private static TrackItem? PlaylistTrack(Run run, string ratingKey) =>
+        run.Preview.Request.PlaylistContents.Values.SelectMany(c => c.Entries).Select(e => e.Track).FirstOrDefault(t => t?.RatingKey == ratingKey);
 
     /// <summary>P6 for the stock firmware: the database on the iPod reads back, and every file it names is there.</summary>
     private bool VerifyStockDatabase(Run run)
@@ -1102,7 +1289,7 @@ public sealed class SyncEngine(
     private async Task RemoveOrphanCoversAndFoldersAsync(Run run)
     {
         var trackFolders = run.State.Tracks.Values.Select(t => Parent(t.DevicePath)).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        foreach (var cover in run.State.Extras.Values.Where(e => !trackFolders.Contains(Parent(e.DevicePath))).ToList())
+        foreach (var cover in run.State.Extras.Values.Where(e => e.Kind == "cover" && !trackFolders.Contains(Parent(e.DevicePath))).ToList())
         {
             DeviceFileOps.Delete(run.Root, cover.DevicePath);
             run.State.Extras.Remove(cover.DevicePath);
@@ -1476,6 +1663,9 @@ public sealed class SyncEngine(
                 _lookups.Release();
             }
         }
+
+        /// <summary>The album from the library snapshot (no Plex request): enough to find its cached cover.</summary>
+        public AlbumDetail AlbumFromSnapshot(string albumKey) => Fallback(albumKey);
 
         private AlbumDetail Fallback(string albumKey)
         {

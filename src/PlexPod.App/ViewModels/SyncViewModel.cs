@@ -9,6 +9,7 @@ using PlexPod.App.Services;
 using PlexPod.Core.Models;
 using PlexPod.Core.Selection;
 using PlexPod.Core.Sync;
+using PlexPod.Device;
 using PlexPod.Device.Sync;
 using PlexPod.Media;
 using PlexPod.Media.Stats;
@@ -139,7 +140,7 @@ public sealed partial class SyncViewModel(
         ProgressValue = 0;
         ProgressText = "Planning the sync (reading the iPod, comparing with Plex)…";
         var request = new SyncRequest(ipod.DriveRoot, ipod.VolumeLabel, ipod.RockboxTarget, client, ffmpeg, snapshot, _selection,
-            library.PlaylistContents, library.FormatOverrides, library.KnownSizes, settings.Policy, _profile, settings.StatsOptions);
+            library.PlaylistContents, library.FormatOverrides, library.KnownSizes, settings.Policy, _profile, settings.StatsOptions, ipod.Firmware);
 
         SyncPreview preview;
         try
@@ -159,8 +160,8 @@ public sealed partial class SyncViewModel(
             return;
         }
 
-        // Plays waiting are reason enough to run a sync whose plan is otherwise empty.
-        var nothingToDo = preview.Plan.IsEmpty && preview.Stats is null or { Plan.IsEmpty: true };
+        // Plays waiting, or a stock library to rebuild, are reason enough to run a sync whose file plan is empty.
+        var nothingToDo = !preview.HasWork;
         if (!confirmation.Confirm(nothingToDo ? "Already in sync" : "Ready to sync", Summarise(preview), preview.CanStart && !nothingToDo))
         {
             ProgressText = nothingToDo ? "The iPod already matches your selection." : "Sync cancelled; nothing was changed.";
@@ -178,7 +179,9 @@ public sealed partial class SyncViewModel(
             var result = await Task.Run(() => engine.ExecuteAsync(preview, progress, stop), CancellationToken.None);
             ProgressValue = 1;
             ProgressText = (result.Completed
-                ? $"Sync complete: {result.Added:N0} added, {result.Retagged + result.Replaced:N0} updated, {result.Removed:N0} removed, {result.PlaylistsWritten:N0} playlists written ({Format.Bytes(result.BytesWritten)}, {result.Elapsed:mm\\:ss}). Run Database → Update Now on the iPod."
+                ? preview.IsStock
+                    ? $"Sync complete: {result.Added:N0} added, {result.Retagged + result.Replaced:N0} updated, {result.Removed:N0} removed ({Format.Bytes(result.BytesWritten)}, {result.Elapsed:mm\\:ss}). The iPod's library is rebuilt: eject it before unplugging."
+                    : $"Sync complete: {result.Added:N0} added, {result.Retagged + result.Replaced:N0} updated, {result.Removed:N0} removed, {result.PlaylistsWritten:N0} playlists written ({Format.Bytes(result.BytesWritten)}, {result.Elapsed:mm\\:ss}). Run Database → Update Now on the iPod."
                 : result.Stopped
                     ? "Sync stopped. The iPod is consistent; press Sync again to finish."
                     : $"Sync finished with {result.Failures.Count:N0} problem(s). Details: /.plexpod/{SyncEngine.ReportFileName} on the iPod.")
@@ -198,7 +201,8 @@ public sealed partial class SyncViewModel(
         }
     }
 
-    private bool CanSendPlays() => device.SelectedDevice is not null && library.Client is not null && library.Snapshot is not null && gate.IsFree;
+    /// <summary>Rockbox only: on the stock firmware Play Counts is consumed together with the database rebuild, so every sync sends plays.</summary>
+    private bool CanSendPlays() => device.SelectedDevice is { Firmware: IpodFirmware.Rockbox } && library.Client is not null && library.Snapshot is not null && gate.IsFree;
 
     /// <summary>D11: send plays and ratings from the iPod now, without syncing.</summary>
     [RelayCommand(CanExecute = nameof(CanSendPlays))]
@@ -299,12 +303,30 @@ public sealed partial class SyncViewModel(
             b.AppendLine();
         }
 
+        if (preview.IsStock)
+        {
+            b.AppendLine("Apple firmware: FLAC is stored as Apple Lossless, and the iPod's library (the iTunesDB) is rebuilt.");
+            if (preview.StockStats is { Plays: > 0 } or { Ratings: > 0 })
+            {
+                b.AppendLine($"First: send {StatsService.Describe(preview.StockStats.Plays, preview.StockStats.Ratings)} from the iPod to Plex.");
+            }
+
+            foreach (var note in preview.Notes)
+            {
+                b.AppendLine("ℹ " + note);
+            }
+
+            b.AppendLine();
+        }
+
         b.AppendLine($"Add: {Format.Count(plan.Count(TrackOpKind.Add), "track")} (≈ {Format.Bytes(addBytes)})");
         b.AppendLine($"Replace (new file in Plex): {plan.Count(TrackOpKind.Replace):N0}");
         b.AppendLine($"Check / update tags: {plan.Count(TrackOpKind.Retag) + plan.TrackOps.Count(o => o.Kind == TrackOpKind.Move && o.AlsoRetag):N0}");
         b.AppendLine($"Move (renamed in Plex): {plan.Count(TrackOpKind.Move):N0}");
         b.AppendLine($"Remove: {Format.Count(plan.TrackRemovals.Count, "track")} ({Format.Bytes(removeBytes)}), last");
-        b.AppendLine($"Playlists to write: {plan.PlaylistOps.Count(p => p.NeedsWrite):N0} of {plan.PlaylistOps.Count:N0} · to remove: {plan.PlaylistRemovals.Count:N0}");
+        b.AppendLine(preview.IsStock
+            ? $"Library: {(preview.StockDatabaseNeedsWrite ? "rebuilt" : "unchanged")}, with {Format.Count(preview.StockPlaylists.Count, "playlist")}{(plan.PlaylistRemovals.Count > 0 ? $" · old Rockbox playlist files removed: {plan.PlaylistRemovals.Count:N0}" : string.Empty)}"
+            : $"Playlists to write: {plan.PlaylistOps.Count(p => p.NeedsWrite):N0} of {plan.PlaylistOps.Count:N0} · to remove: {plan.PlaylistRemovals.Count:N0}");
         b.AppendLine($"Unchanged: {Format.Count(plan.Count(TrackOpKind.Keep), "track")}");
         b.AppendLine();
         b.AppendLine($"Free now: {Format.Bytes(fit.FreeBytes)} · free after: ≈ {Format.Bytes(Math.Max(0, fit.FreeAfterSync))}");
@@ -342,7 +364,9 @@ public sealed partial class SyncViewModel(
         }
 
         b.AppendLine();
-        b.AppendLine("Every file is read back from the iPod and verified. Your own files and playlists are never touched.");
+        b.AppendLine(preview.IsStock
+            ? "Every file is read back from the iPod and verified. Don't let iTunes sync this iPod: it would replace this library."
+            : "Every file is read back from the iPod and verified. Your own files and playlists are never touched.");
         return b.ToString();
     }
 }

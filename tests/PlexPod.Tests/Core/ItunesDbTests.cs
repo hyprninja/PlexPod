@@ -159,6 +159,64 @@ public sealed class ItunesDbTests
         Assert.Throws<ItunesDbFormatException>(() => ItunesDbReader.Read(orphan));
     }
 
+    [Fact]
+    public void ArtworkDb_RoundTrips_WithLibgpodsHeaderSizes()
+    {
+        var entries = new[]
+        {
+            new ArtworkEntry(0x64, 0x1122334455667788, 51_234,
+            [
+                new ArtworkThumb(1028, "F1028_1.ithmb", 0, 20_000, 100, 100, 0, 0),
+                new ArtworkThumb(1029, "F1029_1.ithmb", 0, 80_000, 200, 200, 0, 0),
+            ]),
+            new ArtworkEntry(0x65, 42, 9_999,
+            [
+                new ArtworkThumb(1028, "F1028_1.ithmb", 20_000, 20_000, 82, 82, 18, 18),
+                new ArtworkThumb(1029, "F1029_1.ithmb", 80_000, 80_000, 132, 132, 68, 68),
+            ]),
+        };
+        var bytes = ArtworkDb.Write(entries, ArtworkFormat.IpodVideo);
+
+        Assert.Equal(entries, ArtworkDb.Read(bytes), new ArtworkEntryComparer());
+        Assert.Equal(0x84u, BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(4)));
+        Assert.Equal(0x65u, BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(28))); // highest image id
+        var mhii = bytes.AsSpan().IndexOf("mhii"u8);
+        Assert.Equal(0x98u, BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(mhii + 4)));
+        var mhni = bytes.AsSpan().IndexOf("mhni"u8);
+        Assert.Equal(0x4Cu, BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(mhni + 4)));
+        Assert.Equal(0, bytes.Length % 4);
+        Assert.Equal(2, CountOf(bytes, "mhif"u8));
+        Assert.Throws<ItunesDbFormatException>(() => ArtworkDb.Read(bytes.AsSpan(0, bytes.Length - 4)));
+    }
+
+    private static int CountOf(byte[] data, ReadOnlySpan<byte> tag)
+    {
+        var count = 0;
+        for (var at = data.AsSpan().IndexOf(tag); at >= 0; at = data.AsSpan(at + 1).IndexOf(tag) is var next and >= 0 ? at + 1 + next : -1)
+        {
+            count++;
+        }
+
+        return count;
+    }
+
+    private sealed class ArtworkEntryComparer : IEqualityComparer<ArtworkEntry>
+    {
+        public bool Equals(ArtworkEntry? x, ArtworkEntry? y) =>
+            x is not null && y is not null && x.ImageId == y.ImageId && x.SongDbid == y.SongDbid && x.SourceSize == y.SourceSize && x.Thumbs.SequenceEqual(y.Thumbs);
+
+        public int GetHashCode(ArtworkEntry obj) => obj.ImageId.GetHashCode();
+    }
+
+    [Fact]
+    public void TrackArtworkLink_RoundTrips()
+    {
+        var withArt = Track(1, "a") with { ArtworkId = 0x64, ArtworkSize = 51_234 };
+        var back = ItunesDbReader.Read(ItunesDbWriter.Write(Library([withArt, Track(2, "b")]))).Tracks;
+        Assert.Equal((0x64u, 51_234u), (back[0].Track.ArtworkId, back[0].Track.ArtworkSize));
+        Assert.Equal((0u, 0u), (back[1].Track.ArtworkId, back[1].Track.ArtworkSize));
+    }
+
     [Theory]
     [InlineData(":iPod_Control:Music:F03:ABCD.m4a", 0x4D344120u)] // "M4A "
     [InlineData(":iPod_Control:Music:F03:ABCD.mp3", 0x4D503320u)] // "MP3 "

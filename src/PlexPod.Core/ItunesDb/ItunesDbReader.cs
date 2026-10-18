@@ -154,6 +154,8 @@ public static class ItunesDbReader
                 GaplessData = header >= 0xFC ? r.U32(at + 0xF8) : 0,
                 GaplessTrack = header >= 0x102 && r.U16(at + 0x100) != 0,
                 GaplessAlbum = header >= 0x104 && r.U16(at + 0x102) != 0,
+                ArtworkId = header >= 0x164 && r.U8(at + 0xA4) == 1 ? r.U32(at + 0x160) : 0,
+                ArtworkSize = r.U8(at + 0xA4) == 1 ? r.U32(at + 0x80) : 0,
             };
             tracks.Add(new ItdbReadTrack(r.U32(at + 0x10), track, description, marker));
             at = next;

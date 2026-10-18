@@ -74,4 +74,28 @@ public sealed class ArtProcessorTests
         Assert.True(ArtProcessor.IsBaselineJpeg(baseline));
         Assert.False(ArtProcessor.IsBaselineJpeg([0x89, 0x50]));
     }
+
+    [Fact]
+    public void Rgb565_PacksLittleEndian_AndScalesToFit()
+    {
+        var gray = TagWriterTests.Jpeg(600, 600); // mid grey 0x80
+        var (pixels, width, height, padX, padY) = ArtProcessor.ToRgb565(gray, 100, 100);
+        Assert.Equal(100 * 100 * 2, pixels.Length);
+        Assert.Equal((100, 100, 0, 0), (width, height, padX, padY));
+        var first = (ushort)(pixels[0] | (pixels[1] << 8));
+        Assert.InRange(first >> 11, 15, 16);          // red: 128 >> 3
+        Assert.InRange((first >> 5) & 0x3F, 31, 32);  // green: 128 >> 2
+        Assert.InRange(first & 0x1F, 15, 16);         // blue
+    }
+
+    [Fact]
+    public void Rgb565_SmallCover_IsCentredNotUpscaled()
+    {
+        var small = TagWriterTests.Jpeg(64, 64);
+        var (pixels, width, height, padX, padY) = ArtProcessor.ToRgb565(small, 100, 100);
+        Assert.Equal((82, 82, 18, 18), (width, height, padX, padY)); // inclusive of padding, as libgpod records it
+        Assert.Equal(0, pixels[0] | pixels[1]);                      // black border
+        var centre = ((50 * 100) + 50) * 2;
+        Assert.NotEqual(0, pixels[centre] | pixels[centre + 1]);
+    }
 }

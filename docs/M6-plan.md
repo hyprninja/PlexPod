@@ -1,6 +1,6 @@
 # Milestone 6: Stock Firmware — Two Workflows, Detected Automatically
 
-**Status:** planned, owner decisions D12–D15 made (§11), building not started. Phase 0 (hardware) passed on 18 Oct 2026.
+**Status:** implemented (phases 1–3, 5, 6; 392 tests green), owner decisions D12–D15 (§11). Phase 0 (hardware) passed on 18 Oct 2026. **Phase 4, the first real sync on the iPod and in the car, is next.**
 
 **Goal:** PlexPod syncs the same Plex selection to an iPod running **either** Rockbox **or** Apple's
 stock firmware, works out which one is plugged in, and runs the matching workflow. The stock
@@ -38,18 +38,17 @@ be tried on the device.
 
 ## 2. Detecting which workflow to run
 
-A device is classified on plug-in, read-only, in this order:
+A device is classified on plug-in, read-only, from what's on the disk (as built):
 
-1. **The USB identity of what's mounted** (via WMI `Win32_DiskDrive`): Apple's disk mode reports
-   vendor `APPLE`, product `IPOD` ✅; Rockbox's USB mode reports its own vendor string ⚠️ (Rockbox
-   `usb_storage.c`; to be confirmed on a Rockbox iPod). This tells us which firmware is *running*,
-   which matters on a dual-boot iPod.
-2. **What's on the disk:** `/.rockbox/` → Rockbox installed; `iPod_Control/` without `/.rockbox/`
-   → stock only.
-3. Result: **Rockbox** (Rockbox running, or installed and the USB identity is unknown), **Stock**
-   (Apple disk mode on an iPod without `/.rockbox/`), or **Dual-boot** (Apple disk mode with
-   `/.rockbox/` present). Dual-boot shows a choice of target in the app, remembered per device;
-   the others pick automatically.
+- `/.rockbox/` present → **Rockbox** workflow, exactly as before M6.
+- `iPod_Control/iTunes` and `iPod_Control/Device` present, no `/.rockbox/` → **Stock** workflow.
+
+Rockbox installs alongside Apple's firmware and keeps `iPod_Control/`, so the disk alone can't tell
+a Rockbox iPod from a dual-boot one running Apple's firmware; `/.rockbox/` decides, so a Rockbox iPod
+is never given an Apple database by mistake. (The USB identity, `VEN_APPLE&PROD_IPOD` in Apple's disk
+mode ✅, could tell which firmware is *running* on a dual-boot iPod; that choice is left for later.)
+When the firmware changes, files PlexPod wrote for the other one are removed, last, like unselected
+tracks.
 
 The device panel shows the result ("iPod (Apple firmware)" / "iPod (Rockbox)"), and the sync,
 plan dialog, report and Settings show only what applies to that target.
@@ -137,12 +136,12 @@ touches iTunes itself.
 
 | Phase | What | Notes |
 |---|---|---|
-| 1 | Detection + target model | `DeviceWatcher` reports the kind; the app shows it; Rockbox path unchanged |
-| 2 | `Core/ItunesDb` writer + parser | Pure, no I/O; round-trip and self-consistency tests; libgpod as the reference |
-| 3 | Stock sync engine | Fxx layout, conversion for FLAC (D12), database build + swap, removals, leftovers (D13); end-to-end on the temp-folder iPod |
-| 4 | First real sync | A small selection; check on the iPod's screen, then in the car |
-| 5 | Play Counts → Plex | Parser + consume/delete (D14) + carry-forward into the rebuild |
-| 6 | Artwork | ArtworkDB + ithmb (D15) |
+| 1 | Detection + target model ✅ | `IpodLocator` reports the firmware; the app shows it; Rockbox path unchanged |
+| 2 | `Core/ItunesDb` writer + parser ✅ | Pure; libgpod's layout (version 0x30, 8 sections, sort indexes); reader checked against a real iTunes-written database and libgpod's parser offsets |
+| 3 | Stock sync engine ✅ | `iPod_Control/Music/Fnn`, Apple Lossless verified sample-for-sample (D12), database rebuilt from the manifest and swapped in, never listing a file being removed, P1 via the previous version, leftovers removed (D13) |
+| 4 | **First real sync** | A small selection; check on the iPod's screen, then in the car |
+| 5 | Play Counts → Plex ✅ | Built with phase 3 (it has to be: Play Counts is tied to the database being replaced). Matched by position, folded into the manifest, pending plays kept, file deleted (D14) |
+| 6 | Artwork ✅ | ArtworkDB + `F1028`/`F1029` RGB565 thumbnails, per track; rewritten to the other file index only when covers change |
 
 ## 9. Tests
 - **ItunesDb:** write → parse gives back every field; record sizes and child counts consistent;

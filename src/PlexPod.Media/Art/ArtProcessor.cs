@@ -29,6 +29,35 @@ public static class ArtProcessor
             Encode(Downscale(pixels, side, Math.Min(side, CoverSize)), Math.Min(side, CoverSize)));
     }
 
+    /// <summary>
+    /// A cover as the stock firmware's raw thumbnail: the (square) image scaled down to fit
+    /// <paramref name="width"/>×<paramref name="height"/>, never up, centred on black, packed RGB565
+    /// little-endian (libgpod <c>pack_RGB_565</c>). Returns the bytes and the padding used.
+    /// </summary>
+    public static (byte[] Pixels, int Width, int Height, int HorizontalPadding, int VerticalPadding) ToRgb565(byte[] jpeg, int width, int height)
+    {
+        ArgumentNullException.ThrowIfNull(jpeg);
+        var (pixels, side) = DecodeSquare(jpeg);
+        var target = Math.Min(side, Math.Min(width, height));
+        var scaled = Downscale(pixels, side, target);
+        int padX = (width - target) / 2, padY = (height - target) / 2;
+        var output = new byte[width * height * 2];
+        for (var y = 0; y < target; y++)
+        {
+            for (var x = 0; x < target; x++)
+            {
+                var i = ((y * target) + x) * 3;
+                int b = scaled[i], g = scaled[i + 1], r = scaled[i + 2];
+                var packed = (ushort)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
+                var o = (((y + padY) * width) + x + padX) * 2;
+                output[o] = (byte)packed;
+                output[o + 1] = (byte)(packed >> 8);
+            }
+        }
+
+        return (output, target + padX, target + padY, padX, padY);
+    }
+
     /// <summary>Decodes to 24-bit BGR, centred on a black square canvas.</summary>
     private static (byte[] Pixels, int Side) DecodeSquare(byte[] source)
     {

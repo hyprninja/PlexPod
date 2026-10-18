@@ -33,10 +33,10 @@ public sealed class TagWriterTests : IDisposable
         PlexPodPartId = 9001,
     };
 
-    internal static byte[] Jpeg(int w = 64, int h = 64)
+    internal static byte[] Jpeg(int w = 64, int h = 64, byte fill = 0x80)
     {
         var pixels = new byte[w * h * 3];
-        Array.Fill(pixels, (byte)0x80);
+        Array.Fill(pixels, fill);
         var bitmap = BitmapSource.Create(w, h, 96, 96, PixelFormats.Bgr24, null, pixels, w * 3);
         var encoder = new JpegBitmapEncoder();
         encoder.Frames.Add(BitmapFrame.Create(bitmap));

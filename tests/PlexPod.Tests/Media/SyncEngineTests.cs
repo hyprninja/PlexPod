@@ -180,6 +180,42 @@ public sealed class SyncEngineTests : IDisposable
     }
 
     [FfmpegFact]
+    public async Task Stock_Covers_GoIntoTheArtworkDbAndThumbnailFiles()
+    {
+        MakeStock();
+        await LibraryAsync();
+        await StockSyncAsync(Select(albumA: true, albumB: true));
+
+        var db = Database();
+        Assert.All(db.Tracks, t => Assert.True(t.Track.ArtworkId >= ArtworkDb.FirstImageId));
+        var art = ArtworkDb.Read(File.ReadAllBytes(Local("/iPod_Control/Artwork/ArtworkDB")));
+        Assert.Equal(db.Tracks.Select(t => (t.Track.ArtworkId, t.Track.Dbid)).Order(), art.Select(a => (a.ImageId, a.SongDbid)).Order());
+        Assert.Equal(3 * 100 * 100 * 2, new FileInfo(Local("/iPod_Control/Artwork/F1028_1.ithmb")).Length);
+        Assert.Equal(3 * 200 * 200 * 2, new FileInfo(Local("/iPod_Control/Artwork/F1029_1.ithmb")).Length);
+        Assert.All(art, a => Assert.Equal(["F1028_1.ithmb", "F1029_1.ithmb"], a.Thumbs.Select(t => t.FileName)));
+
+        // Unchanged covers: nothing rewritten. New art in Plex: the other index, and the old one goes.
+        var written = File.GetLastWriteTimeUtc(Local("/iPod_Control/Artwork/F1029_1.ithmb"));
+        SetLibrary([.. _snapshot.Tracks.Select(t => t with { UpdatedAt = 5 })]);
+        await StockSyncAsync(Select(albumA: true, albumB: true));
+        Assert.Equal(written, File.GetLastWriteTimeUtc(Local("/iPod_Control/Artwork/F1029_1.ithmb")));
+
+        _client.Image = TagWriterTests.Jpeg(400, 400, fill: 0x20); // a visibly different cover
+        _client.Albums["alA"] = _client.Albums["alA"] with { ThumbPath = "/thumb/a-new" };
+        _snapshot = new LibrarySnapshot("3", _snapshot.Artists,
+            [.. _snapshot.Albums.Select(a => a.RatingKey == "alA" ? a with { ThumbPath = "/thumb/a-new" } : a)],
+            [.. _snapshot.Tracks.Select(t => t with { UpdatedAt = 6 })],
+            _snapshot.Playlists);
+        var result = await StockSyncAsync(Select(albumA: true, albumB: true));
+
+        Assert.True(result.Completed, string.Join("\n", result.Failures));
+        Assert.True(File.Exists(Local("/iPod_Control/Artwork/F1029_2.ithmb")));
+        Assert.False(File.Exists(Local("/iPod_Control/Artwork/F1029_1.ithmb")));
+        Assert.All(ArtworkDb.Read(File.ReadAllBytes(Local("/iPod_Control/Artwork/ArtworkDB"))), a => Assert.Contains("_2.ithmb", a.Thumbs[1].FileName, StringComparison.Ordinal));
+        AssertStockLibraryIsSound();
+    }
+
+    [FfmpegFact]
     public async Task Stock_ResyncWithNoChanges_TouchesNothing()
     {
         MakeStock();
