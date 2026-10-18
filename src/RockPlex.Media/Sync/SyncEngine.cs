@@ -415,7 +415,7 @@ public sealed class SyncEngine(
                     done++;
                     await run.SaveIfDueAsync().ConfigureAwait(false);
                 }
-                catch (Exception ex) when (ex is DeviceVerifyException
+                catch (Exception ex) when (ex is DeviceVerifyException or ArgumentException or InvalidOperationException
                     || (ex is IOException or UnauthorizedAccessException && Directory.Exists(run.Root)))
                 {
                     run.Fail(op, ex.Message);

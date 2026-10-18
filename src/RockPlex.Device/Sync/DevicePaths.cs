@@ -33,8 +33,9 @@ public static class DevicePaths
     }
 
     /// <summary>
-    /// Absolute, forward slashes only, no drive letters, backslashes, control characters, or
-    /// empty / "." / ".." segments.
+    /// Absolute, forward slashes only, no drive letters, backslashes or control characters, and no
+    /// empty, "." or ".." segments. Dots inside a name are fine ("08 ...It's Just Wide-Open Field.m4a");
+    /// a segment ending in a dot or space is rejected because Windows would silently strip it.
     /// </summary>
     public static bool IsWellFormed(string? devicePath)
     {
@@ -48,7 +49,8 @@ public static class DevicePaths
             return false;
         }
 
-        return devicePath[1..].Split('/').All(segment => segment.Length > 0 && segment is not ("." or ".."));
+        return devicePath[1..].Split('/').All(segment =>
+            segment.Length > 0 && segment is not ("." or "..") && segment[^1] is not ('.' or ' '));
     }
 
     /// <summary>True for a well-formed path inside <c>/Music/</c> or <c>/Playlists/</c>, the folders RockPlex manages.</summary>

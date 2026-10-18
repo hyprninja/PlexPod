@@ -26,6 +26,24 @@ public sealed class DeviceSecurityTests : IDisposable
         Assert.Throws<ArgumentException>(() => DevicePaths.ToLocal(_root, devicePath));
     }
 
+    [Theory]
+    [InlineData("/Music/Cloudkicker/2010 - Beacons/08 ...It's Just Wide-Open Field.m4a")]
+    [InlineData("/Music/Metallica/1988 - ...And Justice for All/01 Blackened.flac")]
+    [InlineData("/Music/A/..Leading dots.flac")]
+    [InlineData("/Playlists/Mix...Tape.m3u8")]
+    public void DotsInsideNames_AreFine(string devicePath)
+    {
+        Assert.True(DevicePaths.IsManaged(devicePath));
+        Assert.EndsWith(Path.GetFileName(devicePath.Replace('/', Path.DirectorySeparatorChar)), DevicePaths.ToLocal(_root, devicePath), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("/Music/Trailing dot./a.flac")]
+    [InlineData("/Music/a.flac ")]
+    [InlineData("/Music/.../a.flac")]
+    public void SegmentsWindowsWouldAlter_AreRejected(string devicePath) =>
+        Assert.False(DevicePaths.IsWellFormed(devicePath));
+
     [Fact]
     public void SafePaths_StayInsideTheDrive()
     {

@@ -539,6 +539,18 @@ public sealed class SyncEngineTests : IDisposable
         Assert.Equal(0, _client.Downloads);
     }
 
+    [FfmpegFact]
+    public async Task TitleStartingWithAnEllipsis_Syncs()
+    {
+        var (a1, a2, b1) = await LibraryAsync();
+        SetLibrary([a1, a2, b1 with { Title = "...It's Just Wide-Open Field", Index = 8 }]);
+
+        var result = await SyncAsync(Select(albumA: false, albumB: true));
+
+        Assert.True(result.Completed, string.Join("\n", result.Failures));
+        Assert.True(File.Exists(Local("/Music/Joni/1971 - Blue/08 ...It's Just Wide-Open Field.mp3")));
+    }
+
     private static void CopyTree(string from, string to)
     {
         foreach (var file in Directory.EnumerateFiles(from, "*", SearchOption.AllDirectories))
