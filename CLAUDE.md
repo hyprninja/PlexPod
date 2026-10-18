@@ -2,11 +2,12 @@
 
 RockPlex is a **Windows desktop app (.NET 10, WPF, Fluent theme)** that syncs a **Plex Media Server music library** to an **iPod 5.5G (Video) 80 GB running Rockbox**. Plex is the source of truth. The iPod should show exactly what Plex shows.
 
-**Status (18 Oct 2026):** M1, M2 and **M3 are done** and verified by the owner on the real library and iPod: a full sync of several playlists (~870 tracks, hi-res conversions, M4A, adopted test-export files), followed by a full bug/security review and fixes (path confinement, manifest reconciliation, token scoping, art and download robustness). 295 tests pass. The Plex JSON fixtures are still representative, not captured. **Next: M4** (stats return: play counts and ratings from the iPod back to Plex).
+**Status (18 Oct 2026):** M1, M2 and **M3 are done** and verified by the owner on the real library and iPod: a full sync of several playlists (~870 tracks, hi-res conversions, M4A, adopted test-export files), followed by a full bug/security review and fixes (path confinement, manifest reconciliation, token scoping, art and download robustness). 295 tests pass. The Plex JSON fixtures are still representative, not captured. **Next: M4** (stats return), see `docs/M4-plan.md` (owner decisions D8–D11 in its §9).
 
 ## Read these first
 | File | What's in it |
 |---|---|
+| `docs/M4-plan.md` | **What to build now.** Stats return: Rockbox playback log + database changelog → Plex plays and ratings, owner decisions D8–D11 |
 | `docs/M3-plan.md` | Milestone 3 (done): sync engine, manifest, playlist guarantees, owner decisions D5–D7 |
 | `docs/M2-plan.md` | Milestone 2 (done): media pipeline, owner decisions D1–D4 |
 | `docs/M1-plan.md` | Milestone 1 (done): foundation + pickers |
