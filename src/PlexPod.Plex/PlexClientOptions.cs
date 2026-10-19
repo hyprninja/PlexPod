@@ -5,7 +5,7 @@ public sealed class PlexClientOptions
 {
     public string Product { get; init; } = "PlexPod";
 
-    public string Version { get; init; } = "1.0.1";
+    public string Version { get; init; } = "1.0.2";
 
     /// <summary>Stable GUID per install, created on first run and saved in settings.</summary>
     public required string ClientIdentifier { get; init; }

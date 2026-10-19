@@ -4,7 +4,7 @@
 
 **Your Plex music library on a classic iPod, exactly as Plex shows it, on Apple's own firmware or Rockbox.**
 
-PlexPod is a Windows app that syncs music from a Plex Media Server to an iPod. Plug the iPod in and PlexPod works out what it runs: **Apple's stock firmware** (so it keeps working with your car and other iPod accessories) or **[Rockbox](https://www.rockbox.org)**. It was built and tested on an **iPod 5.5G (Video)**; see [Which iPods work](#which-ipods-work) for the rest. Pick playlists, artists and albums (or everything), press **Sync**, and the iPod ends up with the same titles, artists, album art and playlists you see in Plex. Each sync only changes what's different, and plays and ratings from the iPod flow back to Plex.
+PlexPod is a Windows app that syncs music from a Plex Media Server to an iPod. Plug the iPod in and PlexPod works out what it runs: **Apple's stock firmware** (so it keeps working with your car and other iPod accessories) or **[Rockbox](https://www.rockbox.org)**. It was built and tested on an **iPod 5.5G (Video)**; see [Which iPods work](#which-ipods-work) for the rest. Pick playlists, artists and albums (or everything), press **Sync**, and the iPod ends up with the same titles, artists, album art and playlists you see in Plex. Each sync only changes what's different, and play counts and ratings from the iPod flow back to Plex.
 
 ![PlexPod syncing playlists to an iPod](docs/images/plexpod-sync.png)
 
@@ -38,7 +38,8 @@ PlexPod is a Windows app that syncs music from a Plex Media Server to an iPod. P
 ![PlexPod settings](docs/images/plexpod-settings.png)
 
 ### Plays and ratings back to Plex
-- Tracks you play on the iPod (or from the car) count as plays in Plex, and ratings you set on the iPod show up there too, at every sync.
+- Tracks you play on the iPod (or from the car) add to the track's **play count** in Plex and update its **last played** time, and ratings you set on the iPod show up there too, at every sync. Smart playlists and sorting by plays or last played pick them up.
+- They don't appear in Plex's **Play History** (*Activity → Play History*). Plex only lists plays there that happen live on a Plex player, and it ignores plays reported after the fact. Each play is still counted, timestamped at the sync rather than when you listened.
 - On Apple's firmware the iPod's own counts are kept and carried into every new library. On Rockbox, turn on *Logging* and plays come from its playback log.
 - If Plex can't be reached, nothing is lost: plays wait for the next sync. A setting decides whether ratings from the iPod replace Plex's or only fill gaps.
 
