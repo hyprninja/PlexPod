@@ -24,14 +24,26 @@ public sealed class PlexLibraryClientTests
             (Microsoft.Extensions.Logging.ILogger<PlexLibraryClient>?)logger ?? NullLogger<PlexLibraryClient>.Instance);
 
     [Fact]
-    public async Task Scrobble_SendsExactlyTheDocumentedRequest()
+    public async Task RecordPlay_ReportsPlaybackToTheEnd_ThroughTheTimeline()
     {
         var fake = new FakeHttpHandler(_ => Status(System.Net.HttpStatusCode.OK));
-        await Create(fake).ScrobbleAsync("48211", CancellationToken.None);
-        var request = Assert.Single(fake.Requests);
-        Assert.Equal(HttpMethod.Get, request.Method);
-        Assert.Equal("http://192.168.1.20:32400/:/scrobble?key=48211&identifier=com.plexapp.plugins.library", request.Uri.ToString());
-        Assert.Equal(ServerToken, request.Headers["X-Plex-Token"]);
+        await Create(fake).RecordPlayAsync("48211", 268_000, CancellationToken.None);
+
+        var requests = fake.Requests.ToList();
+        Assert.Equal(2, requests.Count);
+        Assert.All(requests, r => Assert.Equal(HttpMethod.Get, r.Method));
+        Assert.All(requests, r => Assert.Equal(ServerToken, r.Headers["X-Plex-Token"]));
+        const string item = "http://192.168.1.20:32400/:/timeline?ratingKey=48211&key=%2Flibrary%2Fmetadata%2F48211&identifier=com.plexapp.plugins.library&duration=268000";
+        Assert.Equal(item + "&state=playing&time=0", requests[0].Uri.AbsoluteUri);
+        Assert.Equal(item + "&state=stopped&time=268000", requests[1].Uri.AbsoluteUri);
+    }
+
+    [Fact]
+    public async Task RecordPlay_UnknownLength_FallsBackToMarkingPlayed()
+    {
+        var fake = new FakeHttpHandler(_ => Status(System.Net.HttpStatusCode.OK));
+        await Create(fake).RecordPlayAsync("48211", 0, CancellationToken.None);
+        Assert.Equal("http://192.168.1.20:32400/:/scrobble?key=48211&identifier=com.plexapp.plugins.library", Assert.Single(fake.Requests).Uri.ToString());
     }
 
     [Theory]
@@ -60,8 +72,8 @@ public sealed class PlexLibraryClientTests
     public async Task Scrobble_ServerError_Throws_AndKeyIsEscaped()
     {
         var fake = new FakeHttpHandler(_ => Status(System.Net.HttpStatusCode.InternalServerError));
-        await Assert.ThrowsAsync<HttpRequestException>(() => Create(fake).ScrobbleAsync("1&rating=0", CancellationToken.None));
-        Assert.Contains("key=1%26rating%3D0&", Assert.Single(fake.Requests).Uri.AbsoluteUri);
+        await Assert.ThrowsAsync<HttpRequestException>(() => Create(fake).RecordPlayAsync("1&rating=0", 1000, CancellationToken.None));
+        Assert.Contains("ratingKey=1%26rating%3D0&", Assert.Single(fake.Requests).Uri.AbsoluteUri); // stops at the first failure
     }
 
     [Fact]

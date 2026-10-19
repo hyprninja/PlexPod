@@ -14,7 +14,7 @@ public sealed record MusicSection(string Key, string Title, string? Uuid);
 public sealed record PlexTrackDetail(TrackItem Track, string? MusicBrainzTrackId);
 
 /// <summary>
-/// Access to one server's music library: read-only, except <see cref="ScrobbleAsync"/> and
+/// Access to one server's music library: read-only, except <see cref="RecordPlayAsync"/> and
 /// <see cref="RateAsync"/> (M4 stats return), the only writes PlexPod ever makes to Plex.
 /// </summary>
 public interface IPlexLibraryClient
@@ -49,8 +49,11 @@ public interface IPlexLibraryClient
     /// <summary>Full-size bytes of an image path such as an album <c>thumb</c>.</summary>
     Task<byte[]> DownloadImageAsync(string imagePath, CancellationToken ct);
 
-    /// <summary>Adds one play to a track (Plex sets its last-played time to now).</summary>
-    Task ScrobbleAsync(string ratingKey, CancellationToken ct);
+    /// <summary>
+    /// Records one play of a track, as a player does: a "playing" then a "stopped at the end" timeline
+    /// report, so Plex adds it to the play history and play count (time = now; Plex can't back-date).
+    /// </summary>
+    Task RecordPlayAsync(string ratingKey, long durationMs, CancellationToken ct);
 
     /// <summary>Sets a track's rating, 0–10; -1 clears it.</summary>
     Task RateAsync(string ratingKey, double rating, CancellationToken ct);
@@ -231,10 +234,26 @@ public sealed class PlexLibraryClient(
         return buffer.ToArray();
     }
 
-    public Task ScrobbleAsync(string ratingKey, CancellationToken ct)
+    /// <remarks>
+    /// <c>/:/scrobble</c> only marks an item as played: Plex's own docs say it creates no view history,
+    /// and repeating it for the same track changes nothing. A timeline report that playback reached
+    /// the end is what makes Plex record a view, as it does for any player. Without a known length,
+    /// marking it played is the best that can be done.
+    /// </remarks>
+    public async Task RecordPlayAsync(string ratingKey, long durationMs, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrEmpty(ratingKey);
-        return WriteAsync(HttpMethod.Get, "/:/scrobble", $"?key={Uri.EscapeDataString(ratingKey)}&identifier={LibraryIdentifier}", ct);
+        var key = Uri.EscapeDataString(ratingKey);
+        if (durationMs <= 0)
+        {
+            await WriteAsync(HttpMethod.Get, "/:/scrobble", $"?key={key}&identifier={LibraryIdentifier}", ct).ConfigureAwait(false);
+            return;
+        }
+
+        var item = string.Create(CultureInfo.InvariantCulture,
+            $"?ratingKey={key}&key={Uri.EscapeDataString("/library/metadata/" + ratingKey)}&identifier={LibraryIdentifier}&duration={durationMs}");
+        await WriteAsync(HttpMethod.Get, "/:/timeline", item + "&state=playing&time=0", ct).ConfigureAwait(false);
+        await WriteAsync(HttpMethod.Get, "/:/timeline", item + string.Create(CultureInfo.InvariantCulture, $"&state=stopped&time={durationMs}"), ct).ConfigureAwait(false);
     }
 
     public Task RateAsync(string ratingKey, double rating, CancellationToken ct)

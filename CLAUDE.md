@@ -31,7 +31,7 @@ Status markers in those docs: ✅ verified from a primary source · ⚠️ infer
 8. **Milestone 1 = foundation + pickers** (Plex sign-in, discovery, library fetch, iPod detection, pickers with live capacity bar). **Nothing is written to the iPod in M1.**
 
 ## Invariants (hard rules for all code)
-- **Read-only against Plex libraries.** The only Plex writes ever allowed are play/rating write-back (M4): `ScrobbleAsync` and `RateAsync`, which are never retried (a retried scrobble would count a play twice).
+- **Read-only against Plex libraries.** The only Plex writes ever allowed are play/rating write-back (M4): `RecordPlayAsync` (two `/:/timeline` reports, playing then stopped at the end, which is how a play gets into Plex's history; `/:/scrobble` only marks an item played and records no history) and `RateAsync`, which are never retried (a retried report could count a play twice).
 - **Rockbox's own files are only read** (D9): the playback logs and changelog are never modified, moved or deleted. PlexPod's progress through them lives in `/.plexpod/stats.json`.
 - **Never upsample.** Non-FLAC audio is never re-encoded.
 - **Playlists are never partially copied and never contain a broken entry.** Selecting a playlist pulls in all its tracks; over capacity → block the sync, never trim.

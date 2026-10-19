@@ -102,7 +102,7 @@ public sealed class StatsService(MediaPaths paths, ILogger<StatsService> logger)
                 ct.ThrowIfCancellationRequested();
                 if (step.Kind == StepKind.Send)
                 {
-                    await client.ScrobbleAsync(step.RatingKey!, ct).ConfigureAwait(false);
+                    await client.RecordPlayAsync(step.RatingKey!, step.Entry.LengthMs, ct).ConfigureAwait(false);
                     plays++;
                     sinceSave++;
                     archive?.AppendPlay(step, step.Entry.PlayedAt(Zone));

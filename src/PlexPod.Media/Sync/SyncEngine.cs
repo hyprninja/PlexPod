@@ -562,7 +562,7 @@ public sealed class SyncEngine(
                 while (pendingPlays.TryGetValue(key, out var left) && left > 0)
                 {
                     run.Stop.ThrowIfCancellationRequested();
-                    await request.Client.ScrobbleAsync(key, run.Stop).ConfigureAwait(false);
+                    await request.Client.RecordPlayAsync(key, PlayLength(run, key), run.Stop).ConfigureAwait(false);
                     plays++;
                     if (left == 1)
                     {
@@ -626,6 +626,12 @@ public sealed class SyncEngine(
             run.Warnings.Add($"The iPod's unreadable Play Counts file couldn't be set aside ({ex.Message}).");
         }
     }
+
+    /// <summary>The track's length for reporting a play: from Plex, else as recorded on the iPod; 0 when unknown.</summary>
+    private static long PlayLength(Run run, string ratingKey) =>
+        run.Preview.Request.Snapshot.FindTrack(ratingKey)?.DurationMs is > 0 and var ms
+            ? ms
+            : run.State.Tracks.Values.FirstOrDefault(t => t.RatingKey == ratingKey)?.Stock?.LengthMs ?? 0;
 
     private static DateTime? Later(DateTime? a, DateTime? b) => a is null ? b : b is null ? a : a > b ? a : b;
 
