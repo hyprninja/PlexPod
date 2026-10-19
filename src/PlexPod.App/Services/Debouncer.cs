@@ -13,8 +13,10 @@ public sealed class Debouncer(TimeSpan delay, Action<Exception> onError) : IDisp
     public async void Schedule(Func<CancellationToken, Task> action)
     {
         ArgumentNullException.ThrowIfNull(action);
+
+        // Cancel the previous run but don't dispose its source: it may still be inside its action,
+        // using the token. Each run disposes its own source when it finishes.
         _pending?.Cancel();
-        _pending?.Dispose();
         var cts = _pending = new CancellationTokenSource();
         try
         {
@@ -29,12 +31,21 @@ public sealed class Debouncer(TimeSpan delay, Action<Exception> onError) : IDisp
         {
             onError(ex);
         }
+        finally
+        {
+            if (ReferenceEquals(_pending, cts))
+            {
+                _pending = null;
+            }
+
+            cts.Dispose();
+        }
     }
 
+    /// <summary>Cancels the pending run; it disposes its own source as it finishes.</summary>
     public void Dispose()
     {
         _pending?.Cancel();
-        _pending?.Dispose();
         _pending = null;
     }
 }
