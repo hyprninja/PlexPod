@@ -1,6 +1,6 @@
 # Milestone 6: Stock Firmware — Two Workflows, Detected Automatically
 
-**Status:** implemented and **verified by the owner on 18 Oct 2026**: a playlist synced to the iPod 5.5G on iPod OS 1.3 played in the car first try. Owner decisions D12–D15 in §11. Also verified on 19 Oct 2026 (v1.0.1): a ~1,060-track library and its covers. Still to observe on the real device: plays and ratings coming back through Play Counts.
+**Status:** implemented and **verified by the owner on 18 Oct 2026**: a playlist synced to the iPod 5.5G on iPod OS 1.3 played in the car first try. Owner decisions D12–D15 in §11. Also verified on 19 Oct 2026 (v1.0.1): a ~1,060-track library, its covers, and a rating set on the iPod reaching Plex through Play Counts. Still to observe: a play count reaching Plex.
 
 **Goal:** PlexPod syncs the same Plex selection to an iPod running **either** Rockbox **or** Apple's
 stock firmware, works out which one is plugged in, and runs the matching workflow. The stock
