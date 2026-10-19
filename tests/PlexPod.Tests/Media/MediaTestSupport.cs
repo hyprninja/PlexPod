@@ -141,7 +141,7 @@ internal sealed class FakeLibraryClient : IPlexLibraryClient
     /// <summary>Fails a write before it reaches the fake server (e.g. Plex down after n plays).</summary>
     public Func<string, bool>? FailWrite { get; set; }
 
-    public Task RecordPlayAsync(string ratingKey, long durationMs, CancellationToken ct) => Write($"play:{ratingKey}");
+    public Task RecordPlayAsync(string ratingKey, CancellationToken ct) => Write($"play:{ratingKey}");
 
     public Task RateAsync(string ratingKey, double rating, CancellationToken ct) =>
         Write(string.Create(System.Globalization.CultureInfo.InvariantCulture, $"rate:{ratingKey}={rating}"));

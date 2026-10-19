@@ -35,8 +35,8 @@ public sealed class PlexClientOptions
     /// <summary>Pages read for one list before giving up: a server that never says it's done can't keep a load going forever.</summary>
     public int MaxPages { get; init; } = 10_000;
 
-    /// <summary>How long to wait after reporting a play before reading the track's play count back (for the log).</summary>
-    public TimeSpan PlayStateCheckDelay { get; init; } = TimeSpan.FromSeconds(1.5);
+    /// <summary>How long to wait after sending a play before reading the track's play count back (for the log).</summary>
+    public TimeSpan PlayStateCheckDelay { get; init; } = TimeSpan.FromSeconds(0.5);
 }
 
 /// <summary>Supplies the plex.tv account token. Server requests carry the server's own access token.</summary>

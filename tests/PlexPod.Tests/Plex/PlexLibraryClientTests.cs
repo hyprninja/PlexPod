@@ -27,55 +27,31 @@ public sealed class PlexLibraryClientTests
 
     private static HttpResponseMessage PlayResponder(HttpRequestMessage r) => r.RequestUri!.AbsolutePath switch
     {
-        "/playQueues" => Json("""{ "MediaContainer": { "playQueueID": 77, "playQueueSelectedItemID": 991, "Metadata": [ { "ratingKey": "48211", "playQueueItemID": 991 } ] } }"""),
         "/library/metadata/48211" => Json("""{ "MediaContainer": { "Metadata": [ { "ratingKey": "48211", "viewCount": 3, "lastViewedAt": 1760000000 } ] } }"""),
         _ => Status(System.Net.HttpStatusCode.OK),
     };
 
     [Fact]
-    public async Task RecordPlay_ReportsAPlayerSession_InAPlayQueue()
+    public async Task RecordPlay_Scrobbles_AndLogsThePlayCountAroundIt()
     {
         var fake = new FakeHttpHandler(PlayResponder);
         var log = new CapturingLogger<PlexLibraryClient>();
-        await Create(fake, NoWait, log).RecordPlayAsync("48211", 268_000, CancellationToken.None);
+        await Create(fake, NoWait, log).RecordPlayAsync("48211", CancellationToken.None);
 
         var requests = fake.Requests.ToList();
-        Assert.Equal(["/library/metadata/48211", "/playQueues", "/:/timeline", "/:/timeline", "/:/timeline", "/library/metadata/48211"],
-            requests.Select(r => r.Uri.AbsolutePath));
-        Assert.Equal(HttpMethod.Post, requests[1].Method);
-        Assert.Contains("uri=server%3A%2F%2Fserver-machine-1%2Fcom.plexapp.plugins.library%2Flibrary%2Fmetadata%2F48211", requests[1].Uri.AbsoluteUri);
-
-        var timelines = requests.Where(r => r.Uri.AbsolutePath == "/:/timeline").ToList();
-        const string item = "http://192.168.1.20:32400/:/timeline?ratingKey=48211&key=%2Flibrary%2Fmetadata%2F48211&identifier=com.plexapp.plugins.library&duration=268000&hasMDE=1&containerKey=%2FplayQueues%2F77&playQueueItemID=991";
-        Assert.Equal(item + "&state=playing&time=0&playbackTime=0", timelines[0].Uri.AbsoluteUri);
-        Assert.Equal(item + "&state=playing&time=267000&playbackTime=267000", timelines[1].Uri.AbsoluteUri);
-        Assert.Equal(item + "&state=stopped&time=268000&playbackTime=268000", timelines[2].Uri.AbsoluteUri);
-
-        // One session for the queue and every report, as a player sends them.
-        var sessions = requests.Skip(1).Take(4).Select(r => r.Headers["X-Plex-Session-Identifier"]).Distinct().ToList();
-        Assert.Single(sessions);
-        Assert.All(requests.Skip(1).Take(4), r => Assert.Equal("player", r.Headers["X-Plex-Provides"]));
+        Assert.Equal(["/library/metadata/48211", "/:/scrobble", "/library/metadata/48211"], requests.Select(r => r.Uri.AbsolutePath));
+        Assert.Equal(HttpMethod.Get, requests[1].Method);
+        Assert.Equal("http://192.168.1.20:32400/:/scrobble?key=48211&identifier=com.plexapp.plugins.library", requests[1].Uri.ToString());
         Assert.All(requests, r => Assert.Equal(ServerToken, r.Headers["X-Plex-Token"]));
         Assert.Contains(log.Lines, l => l.Contains("Plex play count 3 -> 3", StringComparison.Ordinal));
     }
 
     [Fact]
-    public async Task RecordPlay_NoPlayQueue_StillReportsThePlay()
+    public async Task RecordPlay_PlayCountUnreadable_StillSendsThePlay()
     {
-        var fake = new FakeHttpHandler(r => r.RequestUri!.AbsolutePath == "/playQueues" ? Status(System.Net.HttpStatusCode.BadRequest) : PlayResponder(r));
-        await Create(fake, NoWait).RecordPlayAsync("48211", 268_000, CancellationToken.None);
-        var timelines = fake.Requests.Where(r => r.Uri.AbsolutePath == "/:/timeline").ToList();
-        Assert.Equal(3, timelines.Count);
-        Assert.DoesNotContain(timelines, r => r.Uri.AbsoluteUri.Contains("playQueueItemID", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public async Task RecordPlay_UnknownLength_FallsBackToMarkingPlayed()
-    {
-        var fake = new FakeHttpHandler(PlayResponder);
-        await Create(fake, NoWait).RecordPlayAsync("48211", 0, CancellationToken.None);
-        Assert.Equal("http://192.168.1.20:32400/:/scrobble?key=48211&identifier=com.plexapp.plugins.library",
-            Assert.Single(fake.Requests, r => r.Uri.AbsolutePath != "/library/metadata/48211").Uri.ToString());
+        var fake = new FakeHttpHandler(r => r.RequestUri!.AbsolutePath == "/:/scrobble" ? Status(System.Net.HttpStatusCode.OK) : Status(System.Net.HttpStatusCode.NotFound));
+        await Create(fake, NoWait).RecordPlayAsync("48211", CancellationToken.None);
+        Assert.Single(fake.Requests, r => r.Uri.AbsolutePath == "/:/scrobble");
     }
 
     [Theory]
@@ -104,9 +80,8 @@ public sealed class PlexLibraryClientTests
     public async Task Scrobble_ServerError_Throws_AndKeyIsEscaped()
     {
         var fake = new FakeHttpHandler(_ => Status(System.Net.HttpStatusCode.InternalServerError));
-        await Assert.ThrowsAsync<HttpRequestException>(() => Create(fake, NoWait).RecordPlayAsync("1&rating=0", 1000, CancellationToken.None));
-        Assert.Contains(fake.Requests, r => r.Uri.AbsoluteUri.Contains("ratingKey=1%26rating%3D0&", StringComparison.Ordinal));
-        Assert.Single(fake.Requests, r => r.Uri.AbsolutePath == "/:/timeline"); // stops at the first failed report
+        await Assert.ThrowsAsync<HttpRequestException>(() => Create(fake, NoWait).RecordPlayAsync("1&rating=0", CancellationToken.None));
+        Assert.Contains("key=1%26rating%3D0&", Assert.Single(fake.Requests, r => r.Uri.AbsolutePath == "/:/scrobble").Uri.AbsoluteUri);
     }
 
     [Fact]

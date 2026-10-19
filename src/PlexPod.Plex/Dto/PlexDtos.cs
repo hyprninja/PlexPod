@@ -52,12 +52,6 @@ internal sealed class ContainerEnvelope
 
 internal sealed class MediaContainerDto
 {
-    [JsonPropertyName("playQueueID")]
-    public long? PlayQueueId { get; set; }
-
-    [JsonPropertyName("playQueueSelectedItemID")]
-    public long? PlayQueueSelectedItemId { get; set; }
-
     public int Size { get; set; }
     public int? TotalSize { get; set; }
     public int? Offset { get; set; }
@@ -97,9 +91,6 @@ internal sealed class MetadataDto
     public int? ViewCount { get; set; }
 
     public long? LastViewedAt { get; set; }
-
-    [JsonPropertyName("playQueueItemID")]
-    public long? PlayQueueItemId { get; set; }
 
     /// <summary>The signed-in user's rating, 0–10; absent when unrated.</summary>
     public double? UserRating { get; set; }
