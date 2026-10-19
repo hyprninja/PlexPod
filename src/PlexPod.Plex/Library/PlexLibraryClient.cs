@@ -235,25 +235,83 @@ public sealed class PlexLibraryClient(
     }
 
     /// <remarks>
-    /// <c>/:/scrobble</c> only marks an item as played: Plex's own docs say it creates no view history,
-    /// and repeating it for the same track changes nothing. A timeline report that playback reached
-    /// the end is what makes Plex record a view, as it does for any player. Without a known length,
-    /// marking it played is the best that can be done.
+    /// <c>/:/scrobble</c> only marks an item as played (Plex's docs: it creates no view history), and a
+    /// bare timeline report didn't add history either (tested 19 Oct 2026). Plex records history for
+    /// playback sessions, so this reports a play as a player does: a play queue for the track, then
+    /// "playing" at the start and near the end and "stopped" at the end, all under one session.
+    /// 🔬 Experimental: the track's play count and last-played time are logged before and after, so
+    /// one real sync shows what Plex recorded. Without a known length, the track is only marked played.
     /// </remarks>
     public async Task RecordPlayAsync(string ratingKey, long durationMs, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrEmpty(ratingKey);
         var key = Uri.EscapeDataString(ratingKey);
+        var before = await TryPlayStateAsync(ratingKey, ct).ConfigureAwait(false);
         if (durationMs <= 0)
         {
             await WriteAsync(HttpMethod.Get, "/:/scrobble", $"?key={key}&identifier={LibraryIdentifier}", ct).ConfigureAwait(false);
-            return;
+        }
+        else
+        {
+            var session = Guid.NewGuid().ToString("N");
+            var item = string.Create(CultureInfo.InvariantCulture,
+                $"?ratingKey={key}&key={Uri.EscapeDataString("/library/metadata/" + ratingKey)}&identifier={LibraryIdentifier}&duration={durationMs}&hasMDE=1");
+            var queue = await TryCreatePlayQueueAsync(ratingKey, session, ct).ConfigureAwait(false);
+            if (queue is { } q)
+            {
+                item += string.Create(CultureInfo.InvariantCulture, $"&containerKey={Uri.EscapeDataString("/playQueues/" + q.QueueId)}&playQueueItemID={q.ItemId}");
+            }
+
+            var nearEnd = Math.Max(0, durationMs - 1000);
+            foreach (var (state, time) in new[] { ("playing", 0L), ("playing", nearEnd), ("stopped", durationMs) })
+            {
+                await SendWriteAsync(HttpMethod.Get, "/:/timeline",
+                    item + string.Create(CultureInfo.InvariantCulture, $"&state={state}&time={time}&playbackTime={time}"), session, ct).ConfigureAwait(false);
+            }
         }
 
-        var item = string.Create(CultureInfo.InvariantCulture,
-            $"?ratingKey={key}&key={Uri.EscapeDataString("/library/metadata/" + ratingKey)}&identifier={LibraryIdentifier}&duration={durationMs}");
-        await WriteAsync(HttpMethod.Get, "/:/timeline", item + "&state=playing&time=0", ct).ConfigureAwait(false);
-        await WriteAsync(HttpMethod.Get, "/:/timeline", item + string.Create(CultureInfo.InvariantCulture, $"&state=stopped&time={durationMs}"), ct).ConfigureAwait(false);
+        if (options.PlayStateCheckDelay > TimeSpan.Zero)
+        {
+            await Task.Delay(options.PlayStateCheckDelay, ct).ConfigureAwait(false);
+        }
+
+        var after = await TryPlayStateAsync(ratingKey, ct).ConfigureAwait(false);
+        logger.LogInformation("Play of {RatingKey} reported: Plex play count {Before} -> {After}, last played {BeforeAt} -> {AfterAt}",
+            ratingKey, before?.ViewCount, after?.ViewCount, before?.LastViewedAt, after?.LastViewedAt);
+    }
+
+    /// <summary>A play queue holding just this track, as a player creates before playing; null if Plex won't make one.</summary>
+    private async Task<(long QueueId, long ItemId)?> TryCreatePlayQueueAsync(string ratingKey, string session, CancellationToken ct)
+    {
+        var uri = $"server://{connection.MachineIdentifier}/{LibraryIdentifier}/library/metadata/{ratingKey}";
+        try
+        {
+            var body = await SendWriteAsync(HttpMethod.Post, "/playQueues",
+                $"?type=audio&uri={Uri.EscapeDataString(uri)}&shuffle=0&repeat=0&continuous=0&own=1", session, ct).ConfigureAwait(false);
+            var container = System.Text.Json.JsonSerializer.Deserialize<ContainerEnvelope>(body, PlexJson.Options)?.MediaContainer;
+            var itemId = container?.PlayQueueSelectedItemId ?? container?.Metadata?.FirstOrDefault()?.PlayQueueItemId;
+            return container?.PlayQueueId is { } queueId && itemId is { } id ? (queueId, id) : null;
+        }
+        catch (Exception ex) when (ex is HttpRequestException { StatusCode: not null } or System.Text.Json.JsonException)
+        {
+            logger.LogWarning("Plex didn't create a play queue for {RatingKey} ({Message}); reporting the play without one", ratingKey, ex.Message);
+            return null;
+        }
+    }
+
+    /// <summary>The track's play count and last-played time as Plex has them (for the log); null if it can't be read.</summary>
+    private async Task<(int? ViewCount, long? LastViewedAt)?> TryPlayStateAsync(string ratingKey, CancellationToken ct)
+    {
+        try
+        {
+            var item = await GetMetadataAsync(ratingKey, string.Empty, ct).ConfigureAwait(false);
+            return item is null ? null : (item.ViewCount ?? 0, item.LastViewedAt);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or PlexProtocolException or System.Text.Json.JsonException
+                                   || (ex is OperationCanceledException && !ct.IsCancellationRequested))
+        {
+            return null;
+        }
     }
 
     public Task RateAsync(string ratingKey, double rating, CancellationToken ct)
@@ -269,16 +327,27 @@ public sealed class PlexLibraryClient(
     }
 
     /// <summary>A write is sent once: never retried, so a dropped connection can't count a play twice.</summary>
-    private async Task WriteAsync(HttpMethod method, string path, string query, CancellationToken ct)
+    private Task WriteAsync(HttpMethod method, string path, string query, CancellationToken ct) =>
+        SendWriteAsync(method, path, query, session: null, ct);
+
+    /// <summary>A write as a player sends it (with a session id when given); returns the response body.</summary>
+    private async Task<string> SendWriteAsync(HttpMethod method, string path, string query, string? session, CancellationToken ct)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(WriteTimeout);
         using var request = CreateRequest(path, query);
         request.Method = method;
         request.Options.Set(TransientRetryHandler.NoRetry, true);
+        if (session is not null)
+        {
+            request.Headers.TryAddWithoutValidation("X-Plex-Session-Identifier", session);
+            request.Headers.TryAddWithoutValidation("X-Plex-Provides", "player");
+        }
+
         logger.LogInformation("{Method} {Uri}", method, PlexRedactor.Redact(request.RequestUri));
         using var response = await http.SendAsync(request, timeout.Token).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
+        return await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false);
     }
 
     private async Task<MetadataDto?> GetMetadataAsync(string ratingKey, string query, CancellationToken ct)

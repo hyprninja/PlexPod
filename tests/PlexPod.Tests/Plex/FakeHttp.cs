@@ -62,6 +62,7 @@ internal static class PlexTestSetup
         Version = "9.9.9",
         DeviceName = "TestPC",
         PinPollInterval = TimeSpan.Zero,
+        PlayStateCheckDelay = TimeSpan.Zero,
         ProbeTimeout = TimeSpan.FromSeconds(1),
     };
 
