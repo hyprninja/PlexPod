@@ -27,4 +27,8 @@
     <ProjectReference Include="..\PlexPod.Media\PlexPod.Media.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="PlexPod.Tests" />
+  </ItemGroup>
+
 </Project>

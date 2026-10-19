@@ -37,6 +37,9 @@ public sealed record AppSettings
 
 /// <summary>
 /// <c>settings.json</c>, written atomically (temp file, then replace). Never holds the Plex token.
+/// More than one PlexPod can be open (an installed copy and a dev build, or a second window), so the
+/// file is the only truth: every change re-reads it under a lock shared between processes and changes
+/// just its own setting, and <see cref="Current"/> picks up what another copy saved.
 /// </summary>
 public sealed class SettingsStore(AppPaths paths, ILogger<SettingsStore> logger)
 {
@@ -44,18 +47,42 @@ public sealed class SettingsStore(AppPaths paths, ILogger<SettingsStore> logger)
 
     private readonly SemaphoreSlim _writeGate = new(1, 1);
     private AppSettings? _current;
+    private (DateTime WrittenUtc, long Length) _loadedStamp;
 
-    public AppSettings Current => _current ??= Load();
+    /// <summary>How long a save waits for another PlexPod to finish its own before going ahead anyway.</summary>
+    internal TimeSpan LockTimeout { get; init; } = TimeSpan.FromSeconds(5);
 
+    /// <summary>The settings as last saved by any PlexPod on this PC.</summary>
+    public AppSettings Current
+    {
+        get
+        {
+            var stamp = Stamp();
+            if (_current is null || (stamp is { } s && s != _loadedStamp))
+            {
+                _current = Read() ?? _current ?? CreateFresh();
+                _loadedStamp = Stamp() ?? default;
+            }
+
+            return _current;
+        }
+    }
+
+    /// <summary>
+    /// Applies <paramref name="change"/> to the settings as they are on disk now, so a change saved by
+    /// another PlexPod since this one loaded is kept, not overwritten with this copy's older values.
+    /// </summary>
     public async Task UpdateAsync(Func<AppSettings, AppSettings> change, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(change);
         await _writeGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            var updated = change(Current);
-            _current = updated;
+            using var crossProcess = await LockAsync(ct).ConfigureAwait(false);
+            var updated = change(Read() ?? Current);
             await WriteAsync(updated, ct).ConfigureAwait(false);
+            _current = updated;
+            _loadedStamp = Stamp() ?? default;
         }
         finally
         {
@@ -63,7 +90,21 @@ public sealed class SettingsStore(AppPaths paths, ILogger<SettingsStore> logger)
         }
     }
 
-    private AppSettings Load()
+    private (DateTime, long)? Stamp()
+    {
+        try
+        {
+            var info = new FileInfo(paths.Settings);
+            return info.Exists ? (info.LastWriteTimeUtc, info.Length) : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The saved settings; null when there are none yet or the file can't be read.</summary>
+    private AppSettings? Read()
     {
         try
         {
@@ -78,11 +119,18 @@ public sealed class SettingsStore(AppPaths paths, ILogger<SettingsStore> logger)
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
         {
-            logger.LogWarning(ex, "settings.json unreadable; starting fresh");
+            logger.LogWarning(ex, "settings.json unreadable");
         }
 
-        // First run (or unreadable file): create and persist a new client identifier straight away.
-        // Written synchronously: Load can run on the UI thread, where blocking on async I/O would deadlock.
+        return null;
+    }
+
+    /// <summary>
+    /// First run (or unreadable file): create and persist a new client identifier straight away.
+    /// Written synchronously: this can run on the UI thread, where blocking on async I/O would deadlock.
+    /// </summary>
+    private AppSettings CreateFresh()
+    {
         var fresh = new AppSettings();
         try
         {
@@ -96,6 +144,33 @@ public sealed class SettingsStore(AppPaths paths, ILogger<SettingsStore> logger)
         }
 
         return fresh;
+    }
+
+    /// <summary>
+    /// An exclusive handle on <c>settings.json.lock</c>, held while one PlexPod reads, changes and
+    /// writes the settings. If another copy holds it for longer than <see cref="LockTimeout"/>, the
+    /// save goes ahead unlocked: a lost race is better than a setting that never saves.
+    /// </summary>
+    private async Task<IDisposable?> LockAsync(CancellationToken ct)
+    {
+        var path = paths.Settings + ".lock";
+        var deadline = DateTime.UtcNow + LockTimeout;
+        while (true)
+        {
+            try
+            {
+                return new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            }
+            catch (IOException) when (DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(25, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                logger.LogWarning(ex, "Saving settings without the lock");
+                return null;
+            }
+        }
     }
 
     private async Task WriteAsync(AppSettings settings, CancellationToken ct)

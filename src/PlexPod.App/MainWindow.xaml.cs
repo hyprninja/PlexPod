@@ -16,6 +16,7 @@ public partial class MainWindow : Window
     private void OnOpenSettings(object sender, RoutedEventArgs e)
     {
         var settings = ((MainViewModel)DataContext).Settings;
+        settings.Reload();
         settings.UpdateCacheUsage();
         new SettingsWindow { Owner = this, DataContext = settings }.ShowDialog();
     }

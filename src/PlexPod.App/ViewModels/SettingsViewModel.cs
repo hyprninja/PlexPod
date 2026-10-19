@@ -40,17 +40,30 @@ public sealed partial class SettingsViewModel : ObservableObject
         _locator = locator;
         _cache = cache;
 
-        var current = settings.Current;
+        foreach (var field in TagPolicy.Fields)
+        {
+            (field.Source == TagFieldSource.Plex ? PlexFields : FileFields).Add(new TagFieldViewModel(field, isOn: false, OnPolicyChanged));
+        }
+
+        Reload();
+    }
+
+    /// <summary>
+    /// Shows the settings as saved now, including changes another PlexPod window made since this one
+    /// opened. Called when the Settings window opens.
+    /// </summary>
+    public void Reload()
+    {
+        var current = _settings.Current;
         _loading = true;
         FfmpegPath = current.FfmpegPath ?? string.Empty;
         CacheCapGb = current.ConversionCacheCapGb.ToString(CultureInfo.CurrentCulture);
         _cache.CapBytes = Math.Max(1, current.ConversionCacheCapGb) * 1024L * 1024 * 1024;
         StatsReturn = current.StatsReturn;
         RatingsFillGapsOnly = current.RatingsFromIpod == RatingMode.FillGapsOnly;
-        foreach (var field in TagPolicy.Fields)
+        foreach (var row in PlexFields.Concat(FileFields))
         {
-            var row = new TagFieldViewModel(field, field.Get(current.TagPolicy), OnPolicyChanged);
-            (field.Source == TagFieldSource.Plex ? PlexFields : FileFields).Add(row);
+            row.IsOn = row.Field.Get(current.TagPolicy);
         }
 
         _loading = false;
@@ -64,7 +77,11 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     public ObservableCollection<TagFieldViewModel> FileFields { get; } = [];
 
-    public TagPolicy Policy => PlexFields.Concat(FileFields).Aggregate(TagPolicy.Default, (p, row) => row.Field.Set(p, row.IsOn));
+    /// <summary>The tag policy as saved (by this window or another PlexPod), which is what a sync uses.</summary>
+    public TagPolicy Policy => _settings.Current.TagPolicy;
+
+    /// <summary>The policy the checklist shows; saved on every change.</summary>
+    private TagPolicy CheckedPolicy => PlexFields.Concat(FileFields).Aggregate(TagPolicy.Default, (p, row) => row.Field.Set(p, row.IsOn));
 
     public FfmpegInstall? Ffmpeg { get; private set; }
 
@@ -97,10 +114,11 @@ public sealed partial class SettingsViewModel : ObservableObject
         set => RatingsFillGapsOnly = !value;
     }
 
-    public RatingMode RatingMode => RatingsFillGapsOnly ? RatingMode.FillGapsOnly : RatingMode.IpodWins;
+    /// <summary>D10, as saved.</summary>
+    public RatingMode RatingMode => _settings.Current.RatingsFromIpod;
 
-    /// <summary>What a sync sends to Plex first; null when stats return is switched off.</summary>
-    public StatsOptions? StatsOptions => StatsReturn ? new StatsOptions(RatingMode) : null;
+    /// <summary>What a sync sends to Plex first, as saved; null when stats return is switched off.</summary>
+    public StatsOptions? StatsOptions => _settings.Current.StatsReturn ? new StatsOptions(RatingMode) : null;
 
     [RelayCommand]
     public async Task DetectAsync()
@@ -154,7 +172,7 @@ public sealed partial class SettingsViewModel : ObservableObject
     {
         if (!_loading)
         {
-            var mode = RatingMode;
+            var mode = value ? RatingMode.FillGapsOnly : RatingMode.IpodWins;
             _ = _settings.UpdateAsync(s => s with { RatingsFromIpod = mode }, CancellationToken.None);
         }
     }
@@ -170,7 +188,7 @@ public sealed partial class SettingsViewModel : ObservableObject
     private async Task SavePolicyAsync()
     {
         UpdateCoreWarning();
-        var policy = Policy;
+        var policy = CheckedPolicy;
         await _settings.UpdateAsync(s => s with { TagPolicy = policy }, CancellationToken.None);
         Changed?.Invoke(this, EventArgs.Empty);
     }
