@@ -4,6 +4,7 @@
     <Project Path="src/PlexPod.App.Shared/PlexPod.App.Shared.csproj" />
     <Project Path="src/PlexPod.Core/PlexPod.Core.csproj" />
     <Project Path="src/PlexPod.Device/PlexPod.Device.csproj" />
+    <Project Path="src/PlexPod.Mac/PlexPod.Mac.csproj" />
     <Project Path="src/PlexPod.Media/PlexPod.Media.csproj" />
     <Project Path="src/PlexPod.Plex/PlexPod.Plex.csproj" />
   </Folder>
