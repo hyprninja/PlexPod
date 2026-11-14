@@ -91,7 +91,8 @@ public sealed class PipelineTests : IDisposable
         Assert.Equal("copied (mp3)", mp3.Action);
 
         var ogg = _dir.File("tone.ogg");
-        await TestFfmpeg.Runner.RunAsync(ffmpeg.Path, ["-hide_banner", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=500:duration=1", "-c:a", "libvorbis", ogg], CancellationToken.None);
+        // ffmpeg's own Vorbis encoder (stereo only, marked experimental) is in every build, the bundled LGPL one included.
+        await TestFfmpeg.Runner.RunAsync(ffmpeg.Path, ["-hide_banner", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=500:duration=1", "-ac", "2", "-c:a", "vorbis", "-strict", "experimental", ogg], CancellationToken.None);
         client.PartFiles[4] = ogg;
         var ex = await Assert.ThrowsAsync<PipelineException>(() => Pipeline(out _).ProcessAsync(client, ffmpeg, StockJob(Track("t4", 4, "ogg"), _dir.File("x.ogg")), CancellationToken.None));
         Assert.Contains("doesn't play on the iPod's Apple firmware", ex.Message, StringComparison.Ordinal);

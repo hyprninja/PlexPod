@@ -119,6 +119,16 @@ public sealed class HardeningTests : IDisposable
     }
 
     [Fact]
+    public void FfmpegSearch_PrefersTheConfiguredPath_ThenTheOneShippedWithTheApp()
+    {
+        var app = OperatingSystem.IsWindows() ? @"C:\Program Files\PlexPod" : "/Applications/PlexPod.app/Contents/MacOS";
+        var mine = OperatingSystem.IsWindows() ? @"C:\tools\ffmpeg.exe" : "/Users/me/ffmpeg";
+        var candidates = FfmpegLocator.Candidates(mine, string.Empty, app).ToList();
+        Assert.Equal(mine, candidates[0]);
+        Assert.Equal(Path.Combine(app, FfmpegLocator.ExecutableName), candidates[1]);
+    }
+
+    [Fact]
     public void OperationGate_LetsOneOperationRunAtATime()
     {
         var gate = new OperationGate();

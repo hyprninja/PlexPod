@@ -49,5 +49,5 @@ public static class PlatformText
 
     public static string FfmpegMissing => OperatingSystem.IsWindows()
         ? "ffmpeg not found. Install it (winget install Gyan.FFmpeg) or enter the path to ffmpeg.exe."
-        : "ffmpeg not found. Install it with soxr: brew tap homebrew-ffmpeg/ffmpeg, then brew install homebrew-ffmpeg/ffmpeg/ffmpeg --with-libsoxr (Homebrew's plain ffmpeg has no soxr). Or enter the path to ffmpeg.";
+        : "ffmpeg not found. PlexPod.app includes its own, so reinstalling PlexPod fixes this; or enter the path to an ffmpeg with soxr.";
 }
