@@ -13,8 +13,9 @@ public sealed record CopyResult(string Sha256, long SizeBytes, IReadOnlyList<str
 /// <summary>
 /// The only code that changes files on the iPod. Every write goes to <c>&lt;path&gt;.plexpod-tmp</c>,
 /// write-through and flushed, then is re-read straight from the device (unbuffered, bypassing the
-/// Windows cache) and compared by SHA-256 before it is renamed into place (owner decision D6).
-/// Callers only pass paths the manifest owns.
+/// Windows cache, or with <c>F_NOCACHE</c> on macOS) and compared by SHA-256 before it is renamed into
+/// place (owner decision D6). On macOS the <c>._</c> twins of written files and folders are removed
+/// (<see cref="MacFileSystem"/>). Callers only pass paths the manifest owns.
 /// </summary>
 public sealed class DeviceFileOps
 {
@@ -38,6 +39,7 @@ public sealed class DeviceFileOps
                 var output = new FileStream(temp, FileMode.Create, FileAccess.Write, FileShare.None, BufferSize, FileOptions.WriteThrough | FileOptions.Asynchronous);
                 await using (output.ConfigureAwait(false))
                 {
+                    MacFileSystem.DisableCache(output.SafeFileHandle);
                     using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
                     var buffer = new byte[BufferSize];
                     int read;
@@ -60,6 +62,7 @@ public sealed class DeviceFileOps
             }
 
             File.Move(temp, final, overwrite: true);
+            MacFileSystem.RemoveTwin(final);
             return new CopyResult(written, size, created);
         }
         catch
@@ -86,6 +89,7 @@ public sealed class DeviceFileOps
             }
 
             File.Move(temp, final, overwrite: true);
+            MacFileSystem.RemoveTwin(final);
             return new CopyResult(expected, new FileInfo(final).Length, created);
         }
         catch
@@ -115,6 +119,7 @@ public sealed class DeviceFileOps
             File.Move(from, to, overwrite: false);
         }
 
+        MacFileSystem.RemoveTwin(to);
         return created;
     }
 
@@ -177,7 +182,10 @@ public sealed class DeviceFileOps
         return count;
     }
 
-    /// <summary>Device paths (exact case as stored on disk) of every file under the given top-level folders.</summary>
+    /// <summary>
+    /// Device paths (exact case as stored on disk, NFC) of every file under the given top-level folders,
+    /// leaving out PlexPod's temp files and macOS's own (<see cref="MacFileSystem.IsMacMetadata"/>).
+    /// </summary>
     public static IReadOnlyList<string> ListFiles(string driveRoot, params string[] topFolders)
     {
         var result = new List<string>();
@@ -188,8 +196,9 @@ public sealed class DeviceFileOps
             {
                 result.AddRange(Directory.EnumerateFiles(local, "*", SearchOption.AllDirectories)
                     .Where(f => !f.EndsWith(DevicePaths.TempSuffix, StringComparison.OrdinalIgnoreCase)
-                        && !f.EndsWith(DevicePaths.LegacyTempSuffix, StringComparison.OrdinalIgnoreCase))
-                    .Select(f => DevicePaths.ToDevice(driveRoot, f)));
+                        && !f.EndsWith(DevicePaths.LegacyTempSuffix, StringComparison.OrdinalIgnoreCase)
+                        && !MacFileSystem.IsMacMetadata(Path.GetFileName(f)))
+                    .Select(f => MacFileSystem.FromListing(DevicePaths.ToDevice(driveRoot, f))));
             }
         }
 
@@ -198,13 +207,14 @@ public sealed class DeviceFileOps
 
     public static long FreeBytes(string driveRoot) => new DriveInfo(driveRoot).AvailableFreeSpace;
 
-    /// <summary>SHA-256 read straight from the device, bypassing the Windows file cache when the volume allows it.</summary>
+    /// <summary>SHA-256 read straight from the device, bypassing the file cache (Windows: no buffering; macOS: F_NOCACHE) when the volume allows it.</summary>
     public static string HashFromDevice(string path)
     {
         SafeFileHandle handle;
         try
         {
-            handle = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.Read, NoBuffering);
+            handle = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.Read, OperatingSystem.IsWindows() ? NoBuffering : FileOptions.None);
+            MacFileSystem.DisableCache(handle);
         }
         catch (Exception ex) when (ex is IOException or ArgumentException or UnauthorizedAccessException)
         {
@@ -259,6 +269,7 @@ public sealed class DeviceFileOps
             if (!Directory.Exists(local))
             {
                 Directory.CreateDirectory(local);
+                MacFileSystem.RemoveTwin(local);
                 created.Add(folder);
             }
         }

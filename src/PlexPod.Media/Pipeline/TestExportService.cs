@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using PlexPod.Core.Models;
 using PlexPod.Core.Sync;
 using PlexPod.Core.Tagging;
+using PlexPod.Device;
 using PlexPod.Media.Art;
 using PlexPod.Media.Ffmpeg;
 using PlexPod.Plex.Library;
@@ -41,9 +42,12 @@ public sealed class TestExportService(
     /// <summary>True when <paramref name="folder"/> is on a drive whose root holds <c>.rockbox</c>.</summary>
     public static bool IsOnRockboxDrive(string folder) => IsOnRockboxDrive(folder, Directory.Exists);
 
-    internal static bool IsOnRockboxDrive(string folder, Func<string, bool> directoryExists)
+    internal static bool IsOnRockboxDrive(string folder, Func<string, bool> directoryExists) =>
+        IsOnRockboxDrive(folder, directoryExists, VolumePaths.RootOf);
+
+    internal static bool IsOnRockboxDrive(string folder, Func<string, bool> directoryExists, Func<string, string> rootOf)
     {
-        var root = Path.GetPathRoot(Path.GetFullPath(folder));
+        var root = rootOf(folder);
         return !string.IsNullOrEmpty(root) && directoryExists(Path.Combine(root, ".rockbox"));
     }
 

@@ -1,5 +1,3 @@
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
 using PlexPod.Core.Tagging;
 using PlexPod.Media.Art;
 using PlexPod.Media.Tags;
@@ -37,12 +35,7 @@ public sealed class TagWriterTests : IDisposable
     {
         var pixels = new byte[w * h * 3];
         Array.Fill(pixels, fill);
-        var bitmap = BitmapSource.Create(w, h, 96, 96, PixelFormats.Bgr24, null, pixels, w * 3);
-        var encoder = new JpegBitmapEncoder();
-        encoder.Frames.Add(BitmapFrame.Create(bitmap));
-        using var stream = new MemoryStream();
-        encoder.Save(stream);
-        return stream.ToArray();
+        return ImageCodec.EncodeJpeg(pixels, w, h, quality: 75); // WIC's default quality, as these tests always used
     }
 
     private static Picture Pic() => new(new ByteVector(Jpeg())) { Type = PictureType.Other, MimeType = "image/jpeg" };

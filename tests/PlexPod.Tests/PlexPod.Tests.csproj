@@ -1,7 +1,9 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <!-- Windows runs the tests against the WPF/WIC builds; macOS against the cross-platform ones. -->
+    <TargetFramework Condition="'$(OS)' == 'Windows_NT'">net10.0-windows</TargetFramework>
+    <TargetFramework Condition="'$(OS)' != 'Windows_NT'">net10.0</TargetFramework>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 
@@ -21,7 +23,14 @@
     <ProjectReference Include="..\..\src\PlexPod.Plex\PlexPod.Plex.csproj" />
     <ProjectReference Include="..\..\src\PlexPod.Device\PlexPod.Device.csproj" />
     <ProjectReference Include="..\..\src\PlexPod.Media\PlexPod.Media.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(OS)' == 'Windows_NT'">
     <ProjectReference Include="..\..\src\PlexPod.App\PlexPod.App.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(OS)' != 'Windows_NT'">
+    <Compile Remove="App\**" />
   </ItemGroup>
 
   <ItemGroup>
