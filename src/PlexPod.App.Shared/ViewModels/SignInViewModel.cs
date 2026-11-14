@@ -8,10 +8,10 @@ using PlexPod.Plex.Auth;
 
 namespace PlexPod.App.ViewModels;
 
-/// <summary>Plex PIN sign-in, token persistence (DPAPI) and sign-out.</summary>
+/// <summary>Plex PIN sign-in, token persistence (DPAPI on Windows, the Keychain on macOS) and sign-out.</summary>
 public sealed partial class SignInViewModel(
     IPlexAuthService auth,
-    TokenStore tokens,
+    ITokenStore tokens,
     InMemoryPlexTokenProvider tokenProvider,
     IBrowserLauncher browser,
     ILogger<SignInViewModel> logger) : ObservableObject

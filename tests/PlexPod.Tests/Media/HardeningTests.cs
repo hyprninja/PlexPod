@@ -1,5 +1,3 @@
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
 using Microsoft.Extensions.Logging.Abstractions;
 using PlexPod.Core.Media;
 using PlexPod.Core.Tagging;
@@ -41,14 +39,7 @@ public sealed class HardeningTests : IDisposable
         Assert.False(File.Exists(_dir.File("second.flac")));
     }
 
-    private static byte[] Png(int w, int h)
-    {
-        var encoder = new PngBitmapEncoder();
-        encoder.Frames.Add(BitmapFrame.Create(BitmapSource.Create(w, h, 96, 96, PixelFormats.Gray8, null, new byte[w * h], w)));
-        using var stream = new MemoryStream();
-        encoder.Save(stream);
-        return stream.ToArray();
-    }
+    private static byte[] Png(int w, int h) => ImageCodec.EncodePng(new byte[w * h * 3], w, h);
 
     [Fact]
     public void HugeArt_IsRejectedBeforeAllocating()
@@ -108,9 +99,23 @@ public sealed class HardeningTests : IDisposable
     [Fact]
     public void FfmpegSearch_IgnoresRelativePathEntries()
     {
-        var candidates = FfmpegLocator.Candidates(null, @".;bin;""C:\Tools\ffmpeg\bin""").ToList();
-        Assert.Contains(@"C:\Tools\ffmpeg\bin\ffmpeg.exe", candidates);
+        var candidates = OperatingSystem.IsWindows()
+            ? FfmpegLocator.Candidates(null, @".;bin;""C:\Tools\ffmpeg\bin""").ToList()
+            : FfmpegLocator.Candidates(null, @".:bin:""/Users/me/tools/ffmpeg""").ToList();
+        Assert.Contains(OperatingSystem.IsWindows() ? @"C:\Tools\ffmpeg\bin\ffmpeg.exe" : "/Users/me/tools/ffmpeg/ffmpeg", candidates);
         Assert.DoesNotContain(candidates, c => !Path.IsPathFullyQualified(c));
+    }
+
+    [Fact]
+    public void FfmpegSearch_OnMac_TriesHomebrewAfterPath()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var candidates = FfmpegLocator.Candidates(null, "/usr/bin").ToList();
+        Assert.Equal(["/usr/bin/ffmpeg", "/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/opt/local/bin/ffmpeg"], candidates);
     }
 
     [Fact]

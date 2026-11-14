@@ -3,7 +3,8 @@ using System.IO;
 namespace PlexPod.App.Services;
 
 /// <summary>
-/// Everything PlexPod keeps on the PC lives under <c>%LOCALAPPDATA%\PlexPod\</c>. Data from before the
+/// Everything PlexPod keeps on the computer lives under <c>%LOCALAPPDATA%\PlexPod\</c> (Windows) or
+/// <c>~/Library/Application Support/PlexPod/</c> (macOS). Data from before the
 /// rename (<c>%LOCALAPPDATA%\RockPlex\</c>) is moved there on first start.
 /// </summary>
 public sealed class AppPaths

@@ -1,0 +1,16 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="PlexPod.Mac.SyncConfirmWindow"
+        Title="Sync" Width="560" SizeToContent="Height" MaxHeight="720" MinWidth="420"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False" CanResize="False">
+    <DockPanel Margin="20">
+        <TextBlock x:Name="Heading" DockPanel.Dock="Top" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,12" />
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0" Spacing="8">
+            <Button x:Name="CloseButton" Content="Cancel" MinWidth="90" IsCancel="True" Click="OnClose" />
+            <Button x:Name="StartButton" Content="Start sync" MinWidth="110" IsDefault="True" Classes="accent" Click="OnStart" />
+        </StackPanel>
+        <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="520">
+            <TextBlock x:Name="Summary" TextWrapping="Wrap" LineHeight="20" />
+        </ScrollViewer>
+    </DockPanel>
+</Window>

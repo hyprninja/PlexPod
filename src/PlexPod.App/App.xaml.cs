@@ -34,7 +34,8 @@ public partial class App : Application
         var services = builder.Services;
         services.AddSingleton(paths);
         services.AddSingleton<SettingsStore>();
-        services.AddSingleton<TokenStore>();
+        services.AddSingleton<ITokenStore, TokenStore>();
+        services.AddSingleton<IUiThread, WpfUiThread>();
         services.AddSingleton<IBrowserLauncher, BrowserLauncher>();
         services.AddSingleton<LibraryState>();
         services.AddSingleton(sp => new PlexClientOptions

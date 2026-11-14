@@ -83,7 +83,7 @@ public sealed class PlaylistVerifier
         if (!_listings.TryGetValue(localFolder, out var names))
         {
             names = Directory.Exists(localFolder)
-                ? new HashSet<string>(Directory.EnumerateFileSystemEntries(localFolder).Select(Path.GetFileName).OfType<string>(), StringComparer.Ordinal)
+                ? new HashSet<string>(Directory.EnumerateFileSystemEntries(localFolder).Select(Path.GetFileName).OfType<string>().Select(MacFileSystem.FromListing), StringComparer.Ordinal)
                 : null;
             _listings[localFolder] = names;
         }

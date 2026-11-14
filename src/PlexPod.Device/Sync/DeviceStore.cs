@@ -54,6 +54,7 @@ public sealed class DeviceStore(string driveRoot)
         }
 
         Directory.Move(LegacyFolder, current);
+        MacFileSystem.RemoveTwin(current);
         return true;
     }
 
@@ -95,6 +96,9 @@ public sealed class DeviceStore(string driveRoot)
         }
 
         File.Move(temp, ManifestPath, overwrite: true);
+        MacFileSystem.RemoveTwin(PreviousManifestPath);
+        MacFileSystem.RemoveTwin(ManifestPath);
+        MacFileSystem.RemoveTwin(Folder);
     }
 
     public async Task<DeviceIdentity> LoadOrCreateIdentityAsync(string? volumeLabel, string? rockboxTarget, CancellationToken ct)
@@ -158,6 +162,8 @@ public sealed class DeviceStore(string driveRoot)
         var temp = path + DevicePaths.TempSuffix;
         await WriteDurableAsync(temp, content, ct).ConfigureAwait(false);
         File.Move(temp, path, overwrite: true);
+        MacFileSystem.RemoveTwin(path);
+        MacFileSystem.RemoveTwin(Path.GetDirectoryName(path)!);
     }
 
     /// <summary>Write-through and flushed to the device before returning.</summary>

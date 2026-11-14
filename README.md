@@ -4,7 +4,7 @@
 
 **Your Plex music library on a classic iPod, exactly as Plex shows it, on Apple's own firmware or Rockbox.**
 
-PlexPod is a Windows app that syncs music from a Plex Media Server to an iPod. Plug the iPod in and PlexPod works out what it runs: **Apple's stock firmware** (so it keeps working with your car and other iPod accessories) or **[Rockbox](https://www.rockbox.org)**. It was built and tested on an **iPod 5.5G (Video)**; see [Which iPods work](#which-ipods-work) for the rest. Pick playlists, artists and albums (or everything), press **Sync**, and the iPod ends up with the same titles, artists, album art and playlists you see in Plex. Each sync only changes what's different, and play counts and ratings from the iPod flow back to Plex.
+PlexPod is a Windows and Mac app that syncs music from a Plex Media Server to an iPod. Plug the iPod in and PlexPod works out what it runs: **Apple's stock firmware** (so it keeps working with your car and other iPod accessories) or **[Rockbox](https://www.rockbox.org)**. It was built and tested on an **iPod 5.5G (Video)**; see [Which iPods work](#which-ipods-work) for the rest. Pick playlists, artists and albums (or everything), press **Sync**, and the iPod ends up with the same titles, artists, album art and playlists you see in Plex. Each sync only changes what's different, and play counts and ratings from the iPod flow back to Plex.
 
 ![PlexPod syncing playlists to an iPod](docs/images/plexpod-sync.png)
 
@@ -63,17 +63,17 @@ Apple's firmware only shows music listed in the iPod's library database. From la
 | iPod nano 3G / 4G, 2007–2008 | ❌ Needs the signed database | ❌ No Rockbox port |
 | iPod nano 5G and later, shuffle, touch | ❌ Newer database formats | ❌ No Rockbox port |
 
-PlexPod recognises those models (from the USB id, the iPod's SysInfo files or the signed database iTunes left on it), lists them and blocks the sync, rather than writing a database the iPod would ignore. The signature has been worked out (libgpod can write it), so native support for the Classic is possible later. iPods have to be formatted for Windows (FAT32): an iPod formatted on a Mac won't appear in Windows.
+PlexPod recognises those models (from the USB id, the iPod's SysInfo files or the signed database iTunes left on it), lists them and blocks the sync, rather than writing a database the iPod would ignore. The signature has been worked out (libgpod can write it), so native support for the Classic is possible later. iPods have to be formatted for Windows (FAT32), on the Mac too: an iPod formatted on a Mac won't appear in Windows, and PlexPod is only tested with FAT32.
 
 ## Getting started
 
 **You'll need**
-- Windows 10 or 11 (64-bit)
+- Windows 10 or 11 (64-bit), or a Mac with Apple silicon (macOS 13 or later)
 - A Plex Media Server with a music library
 - An iPod that works with PlexPod (see [Which iPods work](#which-ipods-work)), connected in disk mode
-- **ffmpeg** with soxr: `winget install Gyan.FFmpeg`. PlexPod finds it automatically.
+- **ffmpeg** with soxr. Windows: `winget install Gyan.FFmpeg`. Mac: install [Homebrew](https://brew.sh), then `brew tap homebrew-ffmpeg/ffmpeg` and `brew install homebrew-ffmpeg/ffmpeg/ffmpeg --with-libsoxr` (Homebrew's plain `ffmpeg` has no soxr, so hi-res FLAC couldn't be converted). PlexPod finds it automatically.
 
-**Install it**
+**Install it on Windows**
 
 Download **PlexPod-x.y.z-x64.msi** from the [latest release](https://github.com/hyprninja/PlexPod/releases/latest) and run it. It includes everything PlexPod needs. The installer isn't code-signed yet, so Windows may warn about an unknown publisher: choose **More info → Run anyway**. Then start **PlexPod** from the Start menu.
 
@@ -84,15 +84,19 @@ cd PlexPod
 dotnet run --project src/PlexPod.App
 ```
 
+**Install it on a Mac**
+
+Download **PlexPod-x.y.z-arm64.dmg** from the [latest release](https://github.com/hyprninja/PlexPod/releases/latest), open it and drag **PlexPod** to Applications. It includes everything PlexPod needs. The app isn't notarised by Apple yet, so the first time, right-click it and choose **Open** (or allow it under **System Settings → Privacy & Security → Open Anyway**). From source: `dotnet run --project src/PlexPod.Mac`.
+
 1. **Sign in with Plex.** Your browser opens Plex's own sign-in page; PlexPod never sees your password.
 2. PlexPod finds your server and loads your music library.
 3. Plug in the iPod. It appears with its firmware and free space.
 4. Tick what you want and watch the capacity bar.
 5. Press **Sync**, check the plan, and start. When it's done:
-   - **Apple firmware:** eject the iPod and unplug it; the new library is there straight away.
+   - **Apple firmware:** eject the iPod and unplug it; the new library is there straight away. On a Mac, use PlexPod's **⏏ Eject** button (or eject it in Finder).
    - **Rockbox:** run **Database → Update Now** on the iPod.
 
-**On Apple's firmware,** don't let iTunes sync the iPod: it would replace PlexPod's library with its own. Keep iTunes closed while the iPod is plugged in (or set it to *Manually manage music*).
+**On Apple's firmware,** don't let iTunes sync the iPod: it would replace PlexPod's library with its own. Keep iTunes closed while the iPod is plugged in (or set it to *Manually manage music*). On a Mac the same goes for **Finder**, which shows the iPod in its sidebar: never press Sync there, and untick *Automatically sync when this iPod is connected*.
 
 **On Rockbox,** set *Settings → General Settings → Playlists → Playlist Viewer Settings → Track Display* to **Title from ID3 tags** (or **Title & Album**) so playlists show song titles instead of file names.
 
@@ -102,12 +106,13 @@ dotnet run --project src/PlexPod.App
 - [x] Sync engine with verified copies and unbreakable playlists
 - [x] Play counts and ratings from the iPod back to Plex
 - [x] Apple's stock firmware alongside Rockbox, detected automatically
+- [ ] The Mac app (built; being checked on the real iPod)
 - [ ] Covers on older iPods' Apple firmware (their thumbnail sizes)
 - [ ] Apple's firmware on the iPod Classic (the signed "hash58" database)
 - [ ] Tray icon, automatic sync when the iPod is plugged in, Last.fm scrobbling
 
 ## Privacy and security
-- Your Plex token is stored encrypted for your Windows account (DPAPI) and is never written to logs. Your **account** token only ever goes to plex.tv over HTTPS; your server only receives its own access token.
+- Your Plex token is stored encrypted for your Windows account (DPAPI), or in your Mac's login Keychain, and is never written to logs. Your **account** token only ever goes to plex.tv over HTTPS; your server only receives its own access token.
 - If your router blocks Plex's secure `plex.direct` addresses, PlexPod falls back to plain HTTP on your local network, so the server token travels unencrypted there. Enter an `https://` address under **Server address** in the main window to avoid that.
 - The only writes PlexPod makes to Plex are plays and ratings.
 - On the iPod, PlexPod only writes to its own music and playlist folders (`/Music` and `/Playlists` for Rockbox; `iPod_Control/Music` and `iPod_Control/Artwork` for Apple's firmware), the iPod's library database, and its own `/.plexpod` folder. It treats everything it reads from the iPod as untrusted.
@@ -117,8 +122,8 @@ dotnet run --project src/PlexPod.App
 dotnet build PlexPod.slnx -c Debug
 dotnet test  PlexPod.slnx
 ```
-To build the installer (WiX Toolset 5, restored as a local dotnet tool), run `installer\build.ps1`; it writes `installer\out\PlexPod-<version>-x64.msi`.
-.NET 10, WPF with the Fluent theme, CommunityToolkit.Mvvm, TagLibSharp and ffmpeg. The iPod database format follows [libgpod](https://github.com/gtkpod/libgpod). Design notes and milestone plans are in [`docs/`](docs/) and [`CLAUDE.md`](CLAUDE.md).
+To build the installer (WiX Toolset 5, restored as a local dotnet tool), run `installer\build.ps1`; it writes `installer\out\PlexPod-<version>-x64.msi`. On a Mac, `installer/build-mac.sh` writes `installer/out-mac/PlexPod.app` and `PlexPod-<version>-arm64.dmg`. The whole solution, including the WPF app, also compiles on a Mac; CI builds and tests on both.
+.NET 10, WPF (Windows) and Avalonia (Mac) with the Fluent theme, CommunityToolkit.Mvvm, TagLibSharp and ffmpeg. The iPod database format follows [libgpod](https://github.com/gtkpod/libgpod). Design notes and milestone plans are in [`docs/`](docs/) and [`CLAUDE.md`](CLAUDE.md).
 
 <details>
 <summary>Project layout</summary>
@@ -128,9 +133,11 @@ To build the installer (WiX Toolset 5, restored as a local dotnet tool), run `in
 | `src/PlexPod.Core` | Models, format policy, size estimates, selection, tag mapping, sync planner, fit check, playlist writer, iTunesDB and ArtworkDB writer and reader, Play Counts, play-log parsing. No packages, no I/O. |
 | `src/PlexPod.Plex` | Plex sign-in, server discovery, library and playlist reads, play and rating write-back. |
 | `src/PlexPod.Device` | iPod detection (Apple firmware or Rockbox), on-iPod state (`/.plexpod/`), verified copies, playlist checks, Rockbox log reading. |
-| `src/PlexPod.Media` | Download, conversion (ffmpeg/soxr, Apple Lossless), tag rewrite (TagLibSharp), artwork (WIC), verification, sync engine, stats return. |
-| `src/PlexPod.App` | The WPF app. |
+| `src/PlexPod.Media` | Download, conversion (ffmpeg/soxr, Apple Lossless), tag rewrite (TagLibSharp), artwork (WIC on Windows, ImageIO on macOS), verification, sync engine, stats return. |
+| `src/PlexPod.App.Shared` | The view models and services both apps share. |
+| `src/PlexPod.App` | The Windows app (WPF). |
+| `src/PlexPod.Mac` | The Mac app (Avalonia). |
 | `tests/PlexPod.Tests` | xUnit tests, including end-to-end syncs against a temporary folder standing in for the iPod. |
 
-App data lives in `%LOCALAPPDATA%\PlexPod\` (settings, encrypted token, logs, play history and a conversion cache capped at 20 GB).
+App data lives in `%LOCALAPPDATA%\PlexPod\` on Windows and `~/Library/Application Support/PlexPod/` on a Mac (settings, logs, play history and a conversion cache capped at 20 GB; the encrypted token too on Windows).
 </details>

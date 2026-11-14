@@ -1,8 +1,15 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- Windows-only: uses WIC (System.Windows.Media.Imaging) for baseline JPEG album art. -->
+  <!--
+    Two builds: net10.0-windows uses WIC (System.Windows.Media.Imaging) for baseline JPEG album art,
+    as it always has; net10.0 (macOS) uses ImageIO. See Art/ImageCodec.*.cs.
+  -->
   <PropertyGroup>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <TargetFrameworks>net10.0-windows;net10.0</TargetFrameworks>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
     <UseWPF>true</UseWPF>
   </PropertyGroup>
 

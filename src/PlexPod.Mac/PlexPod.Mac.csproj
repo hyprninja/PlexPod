@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The macOS app (M7): Avalonia with the Fluent theme (follows the system light/dark setting), over
+    the same view models as the Windows app (PlexPod.App.Shared). Packaged as PlexPod.app by
+    installer/build-mac.sh.
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>PlexPod</AssemblyName>
+    <RootNamespace>PlexPod.Mac</RootNamespace>
+    <Version>1.1.0</Version>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <AvaloniaResource Include="Assets\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.1.6" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.6" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.6" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\PlexPod.Core\PlexPod.Core.csproj" />
+    <ProjectReference Include="..\PlexPod.Plex\PlexPod.Plex.csproj" />
+    <ProjectReference Include="..\PlexPod.Device\PlexPod.Device.csproj" />
+    <ProjectReference Include="..\PlexPod.Media\PlexPod.Media.csproj" />
+    <ProjectReference Include="..\PlexPod.App.Shared\PlexPod.App.Shared.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="PlexPod.Tests" />
+  </ItemGroup>
+
+</Project>

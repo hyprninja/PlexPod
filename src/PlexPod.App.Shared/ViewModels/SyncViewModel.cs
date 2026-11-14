@@ -17,12 +17,6 @@ using PlexPod.Media.Sync;
 
 namespace PlexPod.App.ViewModels;
 
-/// <summary>Shows the plan summary and asks whether to start. Implemented by a WPF dialog.</summary>
-public interface ISyncConfirmation
-{
-    bool Confirm(string title, string summary, bool canStart);
-}
-
 /// <summary>
 /// The Sync button (M3): preview (read-only) → confirm → execute with progress and a safe Stop.
 /// Also reads what PlexPod already owns on the iPod, so the capacity bar counts it as available,
@@ -163,7 +157,7 @@ public sealed partial class SyncViewModel(
 
         // Plays waiting, or a stock library to rebuild, are reason enough to run a sync whose file plan is empty.
         var nothingToDo = !preview.HasWork;
-        if (!confirmation.Confirm(nothingToDo ? "Already in sync" : "Ready to sync", Summarise(preview), preview.CanStart && !nothingToDo))
+        if (!await confirmation.ConfirmAsync(nothingToDo ? "Already in sync" : "Ready to sync", Summarise(preview), preview.CanStart && !nothingToDo))
         {
             ProgressText = nothingToDo ? "The iPod already matches your selection." : "Sync cancelled; nothing was changed.";
             return;

@@ -1529,7 +1529,7 @@ public sealed class SyncEngine(
     {
         try
         {
-            var drive = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(root))!);
+            var drive = new DriveInfo(VolumePaths.RootOf(root));
             return FormattableString.Invariant($"{drive.VolumeLabel}|{drive.TotalSize}|{drive.DriveFormat}");
         }
         catch (Exception ex) when (ex is IOException or ArgumentException or UnauthorizedAccessException)

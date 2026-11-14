@@ -1,6 +1,3 @@
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
-
 namespace PlexPod.Media.Art;
 
 /// <summary>Album art ready for the iPod: a small embedded cover and a larger <c>cover.jpg</c>.</summary>
@@ -8,8 +5,8 @@ public sealed record ArtImages(byte[] EmbeddedJpeg, byte[] CoverJpeg);
 
 /// <summary>
 /// Plex poster → baseline JPEGs (Rockbox can't show progressive JPEGs). Non-square art is padded to
-/// square, and images are only ever scaled down. Uses WIC codecs on plain pixel arrays, with no
-/// visuals, so it is safe on background threads.
+/// square, and images are only ever scaled down. Decoding and encoding go through <see cref="ImageCodec"/>
+/// (WIC on Windows, ImageIO on macOS) on plain pixel arrays, so it is safe on background threads.
 /// </summary>
 public static class ArtProcessor
 {
@@ -61,31 +58,8 @@ public static class ArtProcessor
     /// <summary>Decodes to 24-bit BGR, centred on a black square canvas.</summary>
     private static (byte[] Pixels, int Side) DecodeSquare(byte[] source)
     {
-        BitmapSource frame;
-        using (var stream = new MemoryStream(source, writable: false))
-        {
-            var decoder = BitmapDecoder.Create(stream, BitmapCreateOptions.IgnoreColorProfile, BitmapCacheOption.OnLoad);
-            frame = decoder.Frames[0];
-        }
-
-        // Check the declared size before converting or allocating anything.
-        if (frame.PixelWidth <= 0 || frame.PixelHeight <= 0)
-        {
-            throw new InvalidDataException("Album art has no pixels.");
-        }
-
-        if (frame.PixelWidth > MaxSourceSide || frame.PixelHeight > MaxSourceSide)
-        {
-            throw new InvalidDataException($"Album art is {frame.PixelWidth}×{frame.PixelHeight}; the limit is {MaxSourceSide} px a side.");
-        }
-
-        var bgr = new FormatConvertedBitmap(frame, PixelFormats.Bgr24, null, 0);
-        int w = bgr.PixelWidth, h = bgr.PixelHeight;
-
+        var (raw, w, h) = ImageCodec.DecodeBgr(source, MaxSourceSide);
         var stride = w * 3;
-        var raw = new byte[stride * h];
-        bgr.CopyPixels(raw, stride, 0);
-
         var side = Math.Max(w, h);
         var square = new byte[side * side * 3];
         int offX = (side - w) / 2, offY = (side - h) / 2;
@@ -141,18 +115,7 @@ public static class ArtProcessor
         return dst;
     }
 
-    private static byte[] Encode(byte[] pixels, int side)
-    {
-        var bitmap = BitmapSource.Create(side, side, 96, 96, PixelFormats.Bgr24, null, pixels, side * 3);
-        bitmap.Freeze();
-
-        // WIC's JPEG encoder writes baseline (SOF0) JPEGs.
-        var encoder = new JpegBitmapEncoder { QualityLevel = JpegQuality };
-        encoder.Frames.Add(BitmapFrame.Create(bitmap));
-        using var output = new MemoryStream();
-        encoder.Save(output);
-        return output.ToArray();
-    }
+    private static byte[] Encode(byte[] pixels, int side) => ImageCodec.EncodeJpeg(pixels, side, side, JpegQuality);
 
     /// <summary>True when the JPEG has a baseline SOF0 marker and no progressive SOF2 marker.</summary>
     public static bool IsBaselineJpeg(ReadOnlySpan<byte> jpeg)

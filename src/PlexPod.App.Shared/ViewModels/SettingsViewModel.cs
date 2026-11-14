@@ -126,7 +126,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         FfmpegStatus = "Looking for ffmpeg…";
         Ffmpeg = await _locator.LocateAsync(FfmpegPath, CancellationToken.None);
         FfmpegStatus = Ffmpeg is null
-            ? "ffmpeg not found. Install it (winget install Gyan.FFmpeg) or enter the path to ffmpeg.exe."
+            ? PlatformText.FfmpegMissing
             : $"{Ffmpeg.Description} — {Ffmpeg.Path}";
         UpdateCacheUsage();
         await _settings.UpdateAsync(s => s with { FfmpegPath = string.IsNullOrWhiteSpace(FfmpegPath) ? null : FfmpegPath.Trim() }, CancellationToken.None);

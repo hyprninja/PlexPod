@@ -51,20 +51,31 @@ public interface IDriveSource
     IEnumerable<DriveCandidate> GetDrives();
 }
 
-/// <summary>Ready local drives, skipping network and optical drives.</summary>
+/// <summary>
+/// Ready local drives, skipping network and optical drives. On macOS only volumes mounted under
+/// <c>/Volumes</c> count (the startup disk and the system's own mounts never hold an iPod).
+/// </summary>
 public sealed class SystemDriveSource : IDriveSource
 {
     public IEnumerable<DriveCandidate> GetDrives()
     {
+        var mac = OperatingSystem.IsMacOS();
         foreach (var drive in DriveInfo.GetDrives())
         {
             DriveCandidate? candidate = null;
             try
             {
+                var root = drive.RootDirectory.FullName;
+                if (mac && !IsMacVolume(root))
+                {
+                    continue;
+                }
+
                 // Type first: IsReady on a disconnected mapped network drive can block for ~20 s (SMB timeout).
                 if (drive.DriveType is not (DriveType.Network or DriveType.CDRom or DriveType.NoRootDirectory) && drive.IsReady)
                 {
-                    candidate = new DriveCandidate(drive.RootDirectory.FullName, drive.VolumeLabel, drive.TotalSize, drive.AvailableFreeSpace);
+                    var label = mac ? Path.GetFileName(Path.TrimEndingDirectorySeparator(root)) : drive.VolumeLabel;
+                    candidate = new DriveCandidate(root, label, drive.TotalSize, drive.AvailableFreeSpace);
                 }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -77,6 +88,15 @@ public sealed class SystemDriveSource : IDriveSource
                 yield return candidate;
             }
         }
+    }
+
+    /// <summary>A mount point directly under <c>/Volumes</c> (macOS), e.g. <c>/Volumes/IPOD</c>.</summary>
+    internal static bool IsMacVolume(string root)
+    {
+        var trimmed = Path.TrimEndingDirectorySeparator(root);
+        return trimmed.StartsWith(VolumePaths.MacVolumes, StringComparison.Ordinal)
+            && trimmed.Length > VolumePaths.MacVolumes.Length
+            && trimmed.IndexOf('/', VolumePaths.MacVolumes.Length) < 0;
     }
 }
 

@@ -11,11 +11,15 @@ public sealed record FfmpegInstall(string Path, string Version, bool HasSoxr)
 
 /// <summary>
 /// Finds ffmpeg: the configured path (file or folder), then <c>PATH</c>, then winget's install
-/// locations. PlexPod never bundles or downloads ffmpeg.
+/// locations on Windows, or Homebrew's and MacPorts' on macOS (an app opened from Finder doesn't get
+/// the shell's <c>PATH</c>). PlexPod never bundles or downloads ffmpeg.
 /// </summary>
 public sealed partial class FfmpegLocator(FfmpegRunner runner, ILogger<FfmpegLocator> logger)
 {
-    public const string ExecutableName = "ffmpeg.exe";
+    public static readonly string ExecutableName = OperatingSystem.IsWindows() ? "ffmpeg.exe" : "ffmpeg";
+
+    /// <summary>Where Homebrew (Apple Silicon, then Intel) and MacPorts put ffmpeg.</summary>
+    internal static readonly IReadOnlyList<string> MacInstallFolders = ["/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin"];
 
     public async Task<FfmpegInstall?> LocateAsync(string? configuredPath, CancellationToken ct)
     {
@@ -77,6 +81,16 @@ public sealed partial class FfmpegLocator(FfmpegRunner runner, ILogger<FfmpegLoc
             {
                 yield return System.IO.Path.Combine(dir, ExecutableName);
             }
+        }
+
+        if (!OperatingSystem.IsWindows())
+        {
+            foreach (var dir in MacInstallFolders)
+            {
+                yield return System.IO.Path.Combine(dir, ExecutableName);
+            }
+
+            yield break;
         }
 
         var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);

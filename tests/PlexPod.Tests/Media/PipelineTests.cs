@@ -420,10 +420,21 @@ public sealed class PipelineTests : IDisposable
     [Fact]
     public void RockboxDrive_IsDetectedFromAnyFolderOnIt()
     {
-        static bool IpodOnX(string p) => string.Equals(p, @"X:\.rockbox", StringComparison.OrdinalIgnoreCase);
-        Assert.True(TestExportService.IsOnRockboxDrive(@"X:\Music\export", IpodOnX));
-        Assert.True(TestExportService.IsOnRockboxDrive(@"X:\", IpodOnX));
-        Assert.False(TestExportService.IsOnRockboxDrive(@"C:\Users\me\export", IpodOnX));
+        if (OperatingSystem.IsWindows())
+        {
+            static bool IpodOnX(string p) => string.Equals(p, @"X:\.rockbox", StringComparison.OrdinalIgnoreCase);
+            Assert.True(TestExportService.IsOnRockboxDrive(@"X:\Music\export", IpodOnX));
+            Assert.True(TestExportService.IsOnRockboxDrive(@"X:\", IpodOnX));
+            Assert.False(TestExportService.IsOnRockboxDrive(@"C:\Users\me\export", IpodOnX));
+        }
+        else
+        {
+            static bool IpodMounted(string p) => p == "/Volumes/IPOD/.rockbox";
+            Assert.True(TestExportService.IsOnRockboxDrive("/Volumes/IPOD/Music/export", IpodMounted));
+            Assert.True(TestExportService.IsOnRockboxDrive("/Volumes/IPOD", IpodMounted));
+            Assert.False(TestExportService.IsOnRockboxDrive("/Users/me/export", IpodMounted));
+            Assert.False(TestExportService.IsOnRockboxDrive("/Volumes/Other/export", IpodMounted));
+        }
     }
 
     [Fact]

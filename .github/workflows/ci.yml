@@ -1,0 +1,47 @@
+# Builds and tests PlexPod on Windows (the WPF app, WIC art) and macOS (the Avalonia app, ImageIO art,
+# FAT32 disk-image tests) for every push and pull request (M7 plan, D18).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: 1
+      DOTNET_NOLOGO: 1
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      # ffmpeg (with soxr) runs the conversion and end-to-end sync tests; without it they are skipped.
+      # Homebrew's own ffmpeg has no soxr (nor Vorbis); the homebrew-ffmpeg tap builds it with both.
+      - name: Install ffmpeg (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew tap homebrew-ffmpeg/ffmpeg
+          brew install homebrew-ffmpeg/ffmpeg/ffmpeg --with-libsoxr
+
+      # Chocolatey's plain "ffmpeg" has no soxr; "ffmpeg-full" is Gyan's full build, as winget's Gyan.FFmpeg.
+      - name: Install ffmpeg (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg-full --no-progress -y
+
+      - name: Build
+        run: dotnet build PlexPod.slnx -c Debug
+
+      - name: Test
+        run: dotnet test PlexPod.slnx -c Debug --no-build --logger "console;verbosity=normal"

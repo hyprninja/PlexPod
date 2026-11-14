@@ -12,22 +12,8 @@ using PlexPod.Media.Pipeline;
 
 namespace PlexPod.App.ViewModels;
 
-public interface IFolderPicker
-{
-    string? PickFolder(string title);
-}
-
-public sealed class FolderPicker : IFolderPicker
-{
-    public string? PickFolder(string title)
-    {
-        var dialog = new Microsoft.Win32.OpenFolderDialog { Title = title };
-        return dialog.ShowDialog() == true ? dialog.FolderName : null;
-    }
-}
-
 /// <summary>
-/// M2's Test export: processes the current selection into a PC folder (never the iPod) so the
+/// M2's Test export: processes the current selection into a folder on the computer (never the iPod) so the
 /// pipeline's output can be checked and copied across by hand.
 /// </summary>
 public sealed partial class ExportViewModel(
@@ -93,7 +79,7 @@ public sealed partial class ExportViewModel(
             return;
         }
 
-        var folder = folders.PickFolder("Choose a folder on this PC for the test export");
+        var folder = await folders.PickFolderAsync($"Choose a folder on this {PlatformText.ThisComputer} for the test export");
         if (folder is null)
         {
             return;
@@ -101,7 +87,7 @@ public sealed partial class ExportViewModel(
 
         if (TestExportService.IsOnRockboxDrive(folder))
         {
-            ProgressText = "That folder is on the iPod. Test export writes to the PC only; copy the files across yourself.";
+            ProgressText = $"That folder is on the iPod. Test export writes to the {PlatformText.ThisComputer} only; copy the files across yourself.";
             return;
         }
 
@@ -154,7 +140,7 @@ public sealed partial class ExportViewModel(
     {
         if (LastFolder is not null)
         {
-            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{LastFolder}\"") { UseShellExecute = false })?.Dispose();
+            folders.ShowFolder(LastFolder);
         }
     }
 

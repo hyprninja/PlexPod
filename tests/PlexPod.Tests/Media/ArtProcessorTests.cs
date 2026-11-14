@@ -1,5 +1,3 @@
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
 using PlexPod.Media.Art;
 
 namespace PlexPod.Tests.Media;
@@ -14,18 +12,13 @@ public sealed class ArtProcessorTests
             (pixels[i], pixels[i + 1], pixels[i + 2]) = (b, g, r);
         }
 
-        var encoder = new PngBitmapEncoder();
-        encoder.Frames.Add(BitmapFrame.Create(BitmapSource.Create(w, h, 96, 96, PixelFormats.Bgr24, null, pixels, w * 3)));
-        using var stream = new MemoryStream();
-        encoder.Save(stream);
-        return stream.ToArray();
+        return ImageCodec.EncodePng(pixels, w, h);
     }
 
-    private static BitmapSource Decode(byte[] jpeg)
-    {
-        using var stream = new MemoryStream(jpeg);
-        return BitmapDecoder.Create(stream, BitmapCreateOptions.None, BitmapCacheOption.OnLoad).Frames[0];
-    }
+    private static (byte[] Bgr, int PixelWidth, int PixelHeight) Decode(byte[] jpeg) => ImageCodec.DecodeBgr(jpeg, int.MaxValue);
+
+    private static byte[] PixelAt((byte[] Bgr, int PixelWidth, int PixelHeight) bitmap, int x, int y) =>
+        bitmap.Bgr.AsSpan(((y * bitmap.PixelWidth) + x) * 3, 3).ToArray();
 
     [Fact]
     public void LargeArt_BecomesBaseline300And500()
@@ -42,14 +35,13 @@ public sealed class ArtProcessorTests
     public void NonSquare_IsPaddedToSquare_ColourKeptInTheMiddle()
     {
         var art = ArtProcessor.Process(Png(1000, 500, 0, 0, 255));
-        var bitmap = new FormatConvertedBitmap(Decode(art.EmbeddedJpeg), PixelFormats.Bgr24, null, 0);
+        var bitmap = Decode(art.EmbeddedJpeg);
         Assert.Equal(300, bitmap.PixelWidth);
         Assert.Equal(300, bitmap.PixelHeight);
 
-        var px = new byte[3];
-        bitmap.CopyPixels(new System.Windows.Int32Rect(150, 150, 1, 1), px, 3, 0);
+        var px = PixelAt(bitmap, 150, 150);
         Assert.True(px[0] > 200 && px[2] < 50, "centre should be blue");
-        bitmap.CopyPixels(new System.Windows.Int32Rect(150, 5, 1, 1), px, 3, 0);
+        px = PixelAt(bitmap, 150, 5);
         Assert.True(px[0] < 40 && px[1] < 40 && px[2] < 40, "top band should be black padding");
     }
 

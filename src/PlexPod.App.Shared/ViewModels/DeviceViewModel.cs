@@ -1,5 +1,4 @@
 using System.Collections.ObjectModel;
-using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using PlexPod.App.Services;
 using PlexPod.Core.Models;
@@ -11,10 +10,12 @@ namespace PlexPod.App.ViewModels;
 public sealed partial class DeviceViewModel : ObservableObject, IDisposable
 {
     private readonly DeviceWatcher _watcher;
+    private readonly IUiThread _ui;
 
-    public DeviceViewModel(DeviceWatcher watcher)
+    public DeviceViewModel(DeviceWatcher watcher, IUiThread ui)
     {
         _watcher = watcher;
+        _ui = ui;
         _watcher.DeviceArrived += OnWatcherEvent;
         _watcher.DeviceRemoved += OnWatcherEvent;
         _watcher.DeviceChanged += OnWatcherEvent;
@@ -67,7 +68,7 @@ public sealed partial class DeviceViewModel : ObservableObject, IDisposable
     partial void OnSelectedDeviceChanged(IpodDevice? value) => CapacityChanged?.Invoke(this, EventArgs.Empty);
 
     private void OnWatcherEvent(object? sender, IpodDeviceEventArgs e) =>
-        Application.Current?.Dispatcher.BeginInvoke(Sync);
+        _ui.Post(Sync);
 
     private void Sync()
     {

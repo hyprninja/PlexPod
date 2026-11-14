@@ -1,0 +1,177 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:PlexPod.App.ViewModels;assembly=PlexPod.App.Shared"
+        xmlns:svc="clr-namespace:PlexPod.Mac.Services"
+        xmlns:plex="clr-namespace:PlexPod.Plex.Servers;assembly=PlexPod.Plex"
+        xmlns:lib="clr-namespace:PlexPod.Plex.Library;assembly=PlexPod.Plex"
+        x:Class="PlexPod.Mac.MainWindow"
+        x:DataType="vm:MainViewModel"
+        Title="PlexPod" Width="980" Height="780" MinWidth="720" MinHeight="560"
+        Icon="/Assets/PlexPod.png"
+        WindowStartupLocation="CenterScreen">
+
+    <Window.DataTemplates>
+        <!-- One picker: filter box, Select all / Clear, and a virtualised checkbox list (as the Windows app). -->
+        <DataTemplate DataType="vm:PickerListViewModel">
+            <Grid RowDefinitions="Auto,*" IsEnabled="{Binding IsEnabled}" Margin="0,8,0,0">
+                <DockPanel Margin="0,0,0,8">
+                    <Button DockPanel.Dock="Right" Content="Clear" Command="{Binding ClearCommand}" Margin="6,0,0,0" />
+                    <Button DockPanel.Dock="Right" Content="Select all" Command="{Binding SelectAllCommand}" Margin="6,0,0,0"
+                            ToolTip.Tip="Selects every item that matches the filter" />
+                    <TextBox Text="{Binding FilterText}" PlaceholderText="Filter" AutomationProperties.Name="Filter" />
+                </DockPanel>
+                <ListBox Grid.Row="1" ItemsSource="{Binding View}" SelectionMode="Single"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate DataType="vm:PickerItemViewModel">
+                            <Grid ColumnDefinitions="*,Auto,160,90" MinHeight="28">
+                                <CheckBox IsChecked="{Binding IsChecked}" VerticalAlignment="Center" MinWidth="0">
+                                    <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" />
+                                </CheckBox>
+                                <Border Grid.Column="1" Margin="8,0" Padding="6,1" CornerRadius="4" VerticalAlignment="Center"
+                                        Background="{DynamicResource ControlFillColorSecondaryBrush}"
+                                        IsVisible="{Binding Badge, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                                    <TextBlock Text="{Binding Badge}" FontSize="11" />
+                                </Border>
+                                <TextBlock Grid.Column="2" Text="{Binding Detail}" VerticalAlignment="Center" Opacity="0.7"
+                                           TextTrimming="CharacterEllipsis" />
+                                <TextBlock Grid.Column="3" Text="{Binding SizeText}" VerticalAlignment="Center" TextAlignment="Right" />
+                            </Grid>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </Grid>
+        </DataTemplate>
+    </Window.DataTemplates>
+
+    <Grid Margin="16" RowDefinitions="Auto,Auto,*,Auto">
+
+        <!-- Top bar: sign-in, server, library, refresh. -->
+        <StackPanel Grid.Row="0">
+            <WrapPanel VerticalAlignment="Center">
+                <Button Content="Sign in with Plex" Command="{Binding SignIn.SignInCommand}" Margin="0,0,8,4"
+                        IsVisible="{Binding SignIn.IsSignedOut}" />
+                <Button Content="Cancel" Command="{Binding SignIn.SignInCancelCommand}" Margin="0,0,8,4"
+                        IsVisible="{Binding SignIn.SignInCommand.IsRunning}" />
+                <StackPanel Orientation="Horizontal" Margin="0,0,16,4" VerticalAlignment="Center"
+                            IsVisible="{Binding SignIn.IsSignedIn}">
+                    <TextBlock Text="{Binding SignIn.Username, TargetNullValue='Signed in'}" VerticalAlignment="Center" FontWeight="SemiBold" />
+                    <Button Content="Sign out" Command="{Binding SignIn.SignOutCommand}" Margin="8,0,0,0" />
+                </StackPanel>
+
+                <TextBlock Text="Server" VerticalAlignment="Center" Margin="0,0,6,4" />
+                <ComboBox ItemsSource="{Binding Server.Servers}" SelectedItem="{Binding Server.SelectedServer}"
+                          MinWidth="180" Margin="0,0,16,4" AutomationProperties.Name="Server">
+                    <ComboBox.ItemTemplate>
+                        <DataTemplate DataType="plex:PlexServer">
+                            <TextBlock Text="{Binding Name}" />
+                        </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                </ComboBox>
+                <TextBlock Text="Library" VerticalAlignment="Center" Margin="0,0,6,4" />
+                <ComboBox ItemsSource="{Binding Server.Sections}" SelectedItem="{Binding Server.SelectedSection}"
+                          MinWidth="140" Margin="0,0,16,4" AutomationProperties.Name="Library">
+                    <ComboBox.ItemTemplate>
+                        <DataTemplate DataType="lib:MusicSection">
+                            <TextBlock Text="{Binding Title}" />
+                        </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                </ComboBox>
+                <Button Content="⟳ Refresh" Command="{Binding RefreshCommand}" Margin="0,0,8,4" />
+                <Button Content="⚙ Settings" Click="OnOpenSettings" Margin="0,0,0,4" />
+            </WrapPanel>
+
+            <TextBlock Text="{Binding SignIn.Status}" Margin="0,2" TextWrapping="Wrap"
+                       IsVisible="{Binding SignIn.Status, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+
+            <Expander Header="Server address" Margin="0,4,0,0" HorizontalAlignment="Stretch">
+                <DockPanel Margin="0,6,0,0">
+                    <Button DockPanel.Dock="Right" Content="Use this address" Command="{Binding ApplyServerUrlCommand}" Margin="8,0,0,0" />
+                    <TextBlock DockPanel.Dock="Left" VerticalAlignment="Center" Margin="0,0,8,0" Opacity="0.7"
+                               Text="{Binding Server.ConnectionText, StringFormat='Connected via {0}. Override:'}" />
+                    <TextBox Text="{Binding Server.UrlOverride}"
+                             PlaceholderText="Leave empty to find the server automatically, e.g. http://192.168.1.20:32400"
+                             AutomationProperties.Name="Server URL override" />
+                </DockPanel>
+            </Expander>
+
+            <!-- iPod, with Eject (Mac users must eject before unplugging). -->
+            <Grid Margin="0,10,0,0" ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto">
+                <StackPanel>
+                    <TextBlock Text="{Binding Device.DescriptionText}" TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding Device.WarningText}" TextWrapping="Wrap" Classes="warning"
+                               IsVisible="{Binding Device.WarningText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                </StackPanel>
+                <Button Grid.Column="1" x:Name="EjectButton" x:DataType="svc:EjectViewModel" Content="⏏ Eject" Command="{Binding EjectCommand}"
+                        Margin="8,0,0,0" VerticalAlignment="Top"
+                        ToolTip.Tip="Ejects the iPod so it can be unplugged safely. Not available during a sync." />
+                <TextBlock Grid.Row="1" Grid.ColumnSpan="2" x:Name="EjectStatus" x:DataType="svc:EjectViewModel"
+                           Text="{Binding Status}" TextWrapping="Wrap" Opacity="0.8" Margin="0,2,0,0"
+                           IsVisible="{Binding Status, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+            </Grid>
+        </StackPanel>
+
+        <!-- All songs toggle -->
+        <StackPanel Grid.Row="1" Margin="0,14,0,0" IsEnabled="{Binding Selection.HasLibrary}">
+            <CheckBox Content="All songs" IsChecked="{Binding Selection.AllSongs}" FontWeight="SemiBold" />
+        </StackPanel>
+
+        <!-- Pickers -->
+        <TabControl Grid.Row="2" Margin="0,8,0,0" IsEnabled="{Binding Selection.HasLibrary}">
+            <TabItem Header="{Binding Selection.Playlists.HeaderText}">
+                <ContentControl Content="{Binding Selection.Playlists}" />
+            </TabItem>
+            <TabItem Header="{Binding Selection.Artists.HeaderText}" IsEnabled="{Binding Selection.Artists.IsEnabled}">
+                <ContentControl Content="{Binding Selection.Artists}" />
+            </TabItem>
+            <TabItem Header="{Binding Selection.Albums.HeaderText}" IsEnabled="{Binding Selection.Albums.IsEnabled}">
+                <ContentControl Content="{Binding Selection.Albums}" />
+            </TabItem>
+        </TabControl>
+
+        <!-- Summary -->
+        <StackPanel Grid.Row="3" Margin="0,12,0,0">
+            <ProgressBar Height="10" Minimum="0" Maximum="1" Value="{Binding Summary.FillValue, Mode=OneWay}"
+                         Classes.over="{Binding Summary.IsOver}" AutomationProperties.Name="Capacity" />
+            <TextBlock Text="{Binding Summary.BarText}" Margin="0,6,0,0" FontWeight="SemiBold" Classes.over="{Binding Summary.IsOver}" />
+            <TextBlock Text="{Binding Summary.BreakdownText}" Opacity="0.75" TextWrapping="Wrap" />
+            <DockPanel IsVisible="{Binding Summary.WarningText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" Margin="0,4,0,0">
+                <Button DockPanel.Dock="Right" Content="Forget missing" Command="{Binding ForgetMissingCommand}" Margin="8,0,0,0"
+                        IsVisible="{Binding Selection.HasMissingRefs}" />
+                <TextBlock Text="{Binding Summary.WarningText}" TextWrapping="Wrap" Classes="warning" VerticalAlignment="Center" />
+            </DockPanel>
+
+            <!-- The iPod carries a different saved selection (/.plexpod/selection.json). -->
+            <DockPanel Margin="0,10,0,0" IsVisible="{Binding Sync.DeviceSelectionHint, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                <Button DockPanel.Dock="Right" Content="Load it" Command="{Binding Sync.LoadDeviceSelectionCommand}" Margin="8,0,0,0" />
+                <TextBlock Text="{Binding Sync.DeviceSelectionHint}" TextWrapping="Wrap" VerticalAlignment="Center" />
+            </DockPanel>
+
+            <!-- Sync: progress and a safe Stop. -->
+            <DockPanel Margin="0,10,0,0" IsVisible="{Binding Sync.ProgressText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                <Button DockPanel.Dock="Right" Content="Stop" Command="{Binding Sync.SyncCancelCommand}" Margin="8,0,0,0"
+                        ToolTip.Tip="Finishes the file being copied, then stops. The iPod stays consistent."
+                        IsVisible="{Binding Sync.SyncCommand.IsRunning}" />
+                <Button DockPanel.Dock="Right" Content="Stop" Command="{Binding Sync.SendPlaysNowCancelCommand}" Margin="8,0,0,0"
+                        ToolTip.Tip="Stops sending. Plays already sent are recorded; the rest go next time."
+                        IsVisible="{Binding Sync.SendPlaysNowCommand.IsRunning}" />
+                <StackPanel>
+                    <ProgressBar Height="4" Minimum="0" Maximum="1" Value="{Binding Sync.ProgressValue, Mode=OneWay}"
+                                 IsVisible="{Binding Sync.SyncCommand.IsRunning}" />
+                    <TextBlock Text="{Binding Sync.ProgressText}" TextWrapping="Wrap" Margin="0,4,0,0" />
+                </StackPanel>
+            </DockPanel>
+
+            <DockPanel Margin="0,10,0,0">
+                <Button DockPanel.Dock="Right" Content="Sync" Command="{Binding Sync.SyncCommand}" MinWidth="100" Classes="accent"
+                        ToolTip.Tip="Make the iPod match your selection. Shows the plan first; nothing changes until you confirm." />
+                <Button DockPanel.Dock="Right" Content="Send plays now" Command="{Binding Sync.SendPlaysNowCommand}" Margin="0,0,8,0"
+                        ToolTip.Tip="Send plays and ratings recorded on the iPod to Plex, without syncing (Rockbox). Every sync does this first anyway, and on Apple's firmware only a sync can."
+                        ToolTip.ShowOnDisabled="True" />
+                <ProgressBar DockPanel.Dock="Left" Width="80" Height="4" IsIndeterminate="True" Margin="0,0,10,0" MinWidth="80"
+                             IsVisible="{Binding IsBusy}" />
+                <TextBlock Text="{Binding StatusText}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Opacity="0.8" />
+            </DockPanel>
+        </StackPanel>
+    </Grid>
+</Window>
