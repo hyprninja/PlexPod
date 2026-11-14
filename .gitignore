@@ -482,3 +482,5 @@ $RECYCLE.BIN/
 *.swp
 
 installer/out/
+
+installer/out-mac/

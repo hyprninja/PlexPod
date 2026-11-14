@@ -1,0 +1,42 @@
+# Builds and tests PlexPod on Windows (the WPF app, WIC art) and macOS (the Avalonia app, ImageIO art,
+# FAT32 disk-image tests) for every push and pull request (M7 plan, D18).
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: 1
+      DOTNET_NOLOGO: 1
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      # ffmpeg (with soxr) runs the conversion and end-to-end sync tests; without it they are skipped.
+      - name: Install ffmpeg (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+
+      - name: Install ffmpeg (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg --no-progress -y
+
+      - name: Build
+        run: dotnet build PlexPod.slnx -c Debug
+
+      - name: Test
+        run: dotnet test PlexPod.slnx -c Debug --no-build --logger "console;verbosity=normal"

@@ -1,14 +1,17 @@
 # PlexPod: Claude Code handoff
 
-PlexPod is a **Windows desktop app (.NET 10, WPF, Fluent theme)** that syncs a **Plex Media Server music library** to an **iPod 5.5G (Video) 80 GB running Rockbox**. Plex is the source of truth. The iPod should show exactly what Plex shows.
+PlexPod is a **desktop app for Windows (.NET 10, WPF, Fluent theme) and macOS (Avalonia, Fluent theme)** that syncs a **Plex Media Server music library** to an **iPod 5.5G (Video) 80 GB running Rockbox**. Plex is the source of truth. The iPod should show exactly what Plex shows.
 
 **Renamed (18 Oct 2026):** the app was called **RockPlex** until M4. Code, docs, the exe and the GitHub repo (`hyprninja/PlexPod`) use the new name; the local checkout folder may still be called `RockPlex`.
 
 **Status (18 Oct 2026):** M1, M2 and **M3 are done** and verified by the owner on the real library and iPod: a full sync of several playlists (~870 tracks, hi-res conversions, M4A, adopted test-export files), followed by a full bug/security review and fixes (path confinement, manifest reconciliation, token scoping, art and download robustness). **M4 (stats return) is implemented** per `docs/M4-plan.md` (owner decisions D8–D11 in its §9): builds clean, 350 tests pass (after a second full code review on 18 Oct), including end-to-end syncs against a temp-folder iPod and a fake Plex (plays sent before removals, Plex outage resumes, rotated logs, ratings modes, Send plays now). **Not yet checked by the owner:** plays and ratings reaching the real Plex server from the real iPod (acceptance criteria 2–6). The Plex JSON fixtures are still representative, not captured. The owner has since restored the iPod to stock **iPod OS 1.3** because Rockbox can't talk to the car (the stock firmware can), so M4 is unverified on Rockbox for now. **M6 is done** (392 tests): PlexPod detects stock or Rockbox and runs the matching workflow. Verified by the owner: a playlist synced to the stock iPod played in the car first try. Also verified (19 Oct, v1.0.1 and the dev build after it): a ~1,060-track library and its covers on the iPod, and a rating and a play from the iPod reaching Plex through Play Counts (play count 67 → 68, last played updated; Plex adds no play-history entry for it).
 
+**Mac port (M7, 14 Nov 2026):** in progress on branch `mac-port` (`docs/M7-plan.md`, decisions D16–D18). The owner now uses a Mac. Libraries are cross-platform, the view models moved to `PlexPod.App.Shared`, `src/PlexPod.Mac` is the Avalonia app, `installer/build-mac.sh` builds `PlexPod.app` + `.dmg`. Builds clean on macOS (the WPF app compiles there too); all tests pass on macOS except the ffmpeg ones, which were skipped because ffmpeg wasn't installed yet; CI runs Windows + macOS. **Not yet checked by the owner:** the Windows build after the refactor (D18), and the Mac app against the real Plex server and iPod.
+
 ## Read these first
 | File | What's in it |
 |---|---|
+| `docs/M7-plan.md` | Milestone 7 (in progress): the Mac app, macOS hazards on the iPod's FAT32 (`._` twins, NFD listings), owner decisions D16–D18 |
 | `docs/M6-plan.md` | Milestone 6 (done, verified in the car): stock Apple firmware (for the car) alongside Rockbox, detected automatically: iTunesDB, Fxx layout, ALAC, Play Counts, artwork; owner decisions D12–D15 |
 | `docs/M4-plan.md` | Milestone 4 (implemented, owner verification pending): stats return, Rockbox playback log + database changelog → Plex plays and ratings, owner decisions D8–D11 |
 | `docs/M3-plan.md` | Milestone 3 (done): sync engine, manifest, playlist guarantees, owner decisions D5–D7 |
@@ -21,7 +24,7 @@ PlexPod is a **Windows desktop app (.NET 10, WPF, Fluent theme)** that syncs a *
 Status markers in those docs: ✅ verified from a primary source · ⚠️ inferred, verify before relying on it · 🔬 must be tested against the real server or iPod.
 
 ## Owner decisions (don't revisit without asking)
-1. **Stack:** .NET 10, **WPF**, **Fluent** theme (follows system light/dark). Windows-only app.
+1. **Stack:** .NET 10, **Fluent** theme (follows system light/dark). Windows app in **WPF**; Mac app in **Avalonia** (D16, 14 Nov 2026); both over the shared view models in `PlexPod.App.Shared`. The Windows app must keep looking and behaving as before.
 2. **Target device:** iPod 5.5G **80 GB** (64 MB RAM), stock storage, Rockbox, FAT32.
 3. **Plex is the source of truth** for metadata and album art. The file tags in the library are messy because Plex overlays its own data.
 4. **Tags are rewritten on the iPod copies only**, purely so the iPod shows what Plex shows. **Never modify source files on the server.**
@@ -46,6 +49,7 @@ Status markers in those docs: ✅ verified from a primary source · ⚠️ infer
 - `PlexPod.Core` has **no package dependencies** and no I/O.
 - **Device tags follow `TagPolicy`** (D4): every field can be stripped; only the `PLEXPOD_*` ID tags are always written. Folder names come from Plex values, never from the (possibly stripped) tags.
 - **Device writes go through `DeviceFileOps` only**: temp file → flush → unbuffered read-back SHA-256 → rename. Deletes only for paths in the manifest; stale playlists are removed before tracks, and a track any PlexPod playlist on the iPod still names is never deleted.
+- **macOS on the iPod's FAT32 (M7):** every file and folder PlexPod writes has its `._` AppleDouble twin removed (`MacFileSystem.RemoveTwin`); names read from directory listings are compared in NFC (`MacFileSystem.FromListing`; macOS lists FAT32 names decomposed); macOS metadata (`._*`, `.DS_Store`, Spotlight, Trash) is never a track, playlist or user file. Volume roots come from `VolumePaths.RootOf`, never `Path.GetPathRoot` (which is `/` on macOS). None of this changes Windows behaviour.
 - **Nothing reaches the UI thread that touches drives or the network synchronously** (a disconnected mapped drive or a waking iPod disk can block for ~20 s).
 
 ## Conventions
@@ -55,14 +59,17 @@ Status markers in those docs: ✅ verified from a primary source · ⚠️ infer
 - HTTP via `IHttpClientFactory`; JSON via `System.Text.Json` (Plex sends `ratingKey` as a **string**; allow numbers-as-strings).
 - Tests: xUnit; Plex tests use a fake `HttpMessageHandler` + JSON fixtures; device tests use temp directories as fake drives.
 - App data: `%LOCALAPPDATA%\PlexPod\` (`settings.json`, `token.bin`, `logs\`, `cache\` = `work\`, `converted\`, `art\`).
-- `PlexPod.Media` is `net10.0-windows` (WIC for baseline JPEG art); so is the test project. ffmpeg is found, never bundled (settings path → PATH → winget).
+- `PlexPod.Media` multi-targets `net10.0-windows` (WIC for baseline JPEG art) and `net10.0` (macOS ImageIO), behind `Art/ImageCodec.*.cs`. The test project is `net10.0-windows` on Windows and `net10.0` elsewhere. `EnableWindowsTargeting` lets the WPF projects compile on a Mac. ffmpeg is found, never bundled (settings path → PATH → winget on Windows, Homebrew/MacPorts folders on macOS).
+- View models live in `PlexPod.App.Shared` (no UI framework); each app implements `IUiThread`, `ITokenStore` (DPAPI file / Keychain), `IFolderPicker`, `ISyncConfirmation` (`Services/PlatformSeams.cs`). Mac app data: `~/Library/Application Support/PlexPod/`.
 - Edit source files with tools that keep UTF-8 intact. Windows PowerShell 5.1's `Get-Content`/`Set-Content` without `-Encoding` re-encodes non-ASCII text (… — → ✓) and corrupts it.
 
 ## Commands
 ```
 dotnet build PlexPod.slnx -c Debug
 dotnet test  PlexPod.slnx
-dotnet run --project src/PlexPod.App
+dotnet run --project src/PlexPod.App        # Windows
+dotnet run --project src/PlexPod.Mac        # macOS (SDK in ~/.dotnet on the owner's Mac)
+installer/build-mac.sh                      # macOS: PlexPod.app + dmg in installer/out-mac
 ```
 
 ## Milestones
@@ -73,6 +80,7 @@ dotnet run --project src/PlexPod.App
 | M3 | ✅ done. Sync engine: device manifest, add/re-tag/remove, `.m3u8` playlists with guarantees, interrupt safety, fit-check gate, `/.plexpod/selection.json` on the iPod |
 | M4 | ✅ implemented, owner verification pending. Stats return: Rockbox playback log + database changelog → Plex scrobble/rate, step 0 of every sync, Send plays now |
 | M6 | ✅ done, verified in the car. Stock Apple firmware alongside Rockbox, detected automatically (`docs/M6-plan.md`) |
+| M7 | Mac app (Avalonia) sharing the view models; macOS FAT32 handling. In progress (`docs/M7-plan.md`) |
 | M5 | Polish (after M6): tray, auto-sync on plug-in, Last.fm forwarding (from `stats\<device>\plays.jsonl`), optional "appears on" artist scope |
 
 ## Technical cheat-sheet

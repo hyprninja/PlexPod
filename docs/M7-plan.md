@@ -1,6 +1,10 @@
 # Milestone 7: PlexPod on macOS
 
-**Status:** in progress (14 Nov 2026), on branch `mac-port`. Owner decisions D16–D18 in §9.
+**Status:** implemented on branch `mac-port` (14 Nov 2026), waiting for the owner's checks (§8).
+Builds clean on macOS, with the WPF app compiling there too. All tests pass on macOS (ffmpeg tests
+skipped until ffmpeg is installed), including FAT32 disk-image tests that fail without the §3
+fixes. The Keychain round trip was checked by hand, the packaged `PlexPod.app` launches, and the
+windows were checked in a headless render. Owner decisions D16–D18 in §9.
 
 **Goal:** the owner can sync the iPod from a Mac, with the same guarantees as on Windows: the same
 selection, the same files and tags on the iPod, the same playlists, the same stats return. **The
@@ -51,14 +55,18 @@ churn every file. Nothing about the sync pipeline, its order or its invariants c
 ## 3. macOS hazards for the iPod (new invariants)
 
 1. **AppleDouble files.** On FAT32, macOS stores extended attributes in `._name` files. A Rockbox
-   database scan would list `._track.flac` as a broken track. PlexPod writes files with plain
-   `FileStream`, which sets no attributes, but macOS may add some (`com.apple.provenance`,
-   quarantine) ⚠️. So: before the rename, every attribute on a temp file PlexPod wrote is removed,
-   and any `._` twin of a file PlexPod wrote is deleted (it's part of that file, so the manifest
-   rule holds). `._*`, `.DS_Store`, `.Spotlight-V100`, `.fseventsd` and `.Trashes` are never treated as
-   tracks, playlists or the user's files by the planner or verifier. 🔬
+   database scan would list `._track.flac` as a broken track (and `._Mix.m3u8` as a broken playlist).
+   ✅ Measured on a FAT32 image: macOS gives **every file and folder a process creates** a
+   `com.apple.provenance` attribute, which `xattr -c` can't remove, so a `._` twin appears next to
+   each one, folders included. Deleting the twin itself works and leaves the file clean. So after
+   every write, rename and folder creation PlexPod deletes the twin (it's part of a file PlexPod
+   owns, so the manifest rule holds). `._*`, `.DS_Store`, `.Spotlight-V100`, `.fseventsd` and
+   `.Trashes` are never treated as tracks, playlists or the user's files. 🔬 Spotlight's own folders
+   at the iPod root are macOS's; whether Rockbox's database scan minds them is untested.
 2. **Unicode normalisation.** macOS can return file names decomposed (NFD) where Plex and the
-   manifest use composed (NFC) ⚠️. Every name read from a directory listing on the iPod is compared
+   manifest use composed (NFC). ✅ Measured on a FAT32 image: listings come back NFD even for names
+   written NFC; lookups match either form. Without the fix every playlist line with an accent fails
+   verification and blocks the sync. Every name read from a directory listing on the iPod is compared
    in NFC; device paths PlexPod writes stay NFC, as on Windows, so a Mac-synced and a PC-synced iPod
    hold the same bytes. The playlist verifier's exact-name check (case-sensitive per Rockbox) compares
    NFC to NFC. 🔬 Tested on a real FAT32 disk image (`hdiutil create -fs MS-DOS`) in CI and locally.
