@@ -484,3 +484,4 @@ $RECYCLE.BIN/
 installer/out/
 
 installer/out-mac/
+installer/ffmpeg-mac/build/

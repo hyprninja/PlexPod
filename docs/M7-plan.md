@@ -131,6 +131,12 @@ manifest-only deletes; device writes through `DeviceFileOps`; untrusted iPod dat
   Homebrew and ffmpeg.
 - **D18 (14 Nov 2026):** CI on Windows and macOS for every push, plus a hands-on check of the
   Windows build by the owner before merging.
+- **D19 (14 Nov 2026):** the Mac app **bundles its own ffmpeg**, replacing "never bundled" for the
+  Mac (Homebrew's ffmpeg has no soxr, and the tap that does needs a build from source). ffmpeg 9.0.2,
+  LGPL only (no GPL or non-free parts), libsoxr 0.1.3 linked statically, arm64, macOS 13+, nothing
+  outside macOS linked; checked by `installer/ffmpeg-mac/build-ffmpeg.sh`. The unmodified source
+  archives, the script and the licence notice ship with each release; users may swap in their own
+  build. A path set in Settings still wins. The Windows installer is unchanged.
 
 ## 10. Open / out of scope
 

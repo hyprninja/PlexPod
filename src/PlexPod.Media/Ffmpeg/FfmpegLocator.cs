@@ -10,9 +10,10 @@ public sealed record FfmpegInstall(string Path, string Version, bool HasSoxr)
 }
 
 /// <summary>
-/// Finds ffmpeg: the configured path (file or folder), then <c>PATH</c>, then winget's install
-/// locations on Windows, or Homebrew's and MacPorts' on macOS (an app opened from Finder doesn't get
-/// the shell's <c>PATH</c>). PlexPod never bundles or downloads ffmpeg.
+/// Finds ffmpeg: the configured path (file or folder), then the one shipped next to the app (the Mac
+/// app bundles its own, D19), then <c>PATH</c>, then winget's install locations on Windows, or
+/// Homebrew's and MacPorts' on macOS (an app opened from Finder doesn't get the shell's <c>PATH</c>).
+/// PlexPod never downloads ffmpeg.
 /// </summary>
 public sealed partial class FfmpegLocator(FfmpegRunner runner, ILogger<FfmpegLocator> logger)
 {
@@ -63,14 +64,20 @@ public sealed partial class FfmpegLocator(FfmpegRunner runner, ILogger<FfmpegLoc
     }
 
     internal static IEnumerable<string> Candidates(string? configuredPath) =>
-        Candidates(configuredPath, Environment.GetEnvironmentVariable("PATH"));
+        Candidates(configuredPath, Environment.GetEnvironmentVariable("PATH"), AppContext.BaseDirectory);
 
-    internal static IEnumerable<string> Candidates(string? configuredPath, string? pathVariable)
+    internal static IEnumerable<string> Candidates(string? configuredPath, string? pathVariable, string? appFolder = null)
     {
         if (!string.IsNullOrWhiteSpace(configuredPath))
         {
             var trimmed = configuredPath.Trim().Trim('"');
             yield return Directory.Exists(trimmed) ? System.IO.Path.Combine(trimmed, ExecutableName) : trimmed;
+        }
+
+        // Shipped with the app (PlexPod.app/Contents/MacOS/ffmpeg): a known build with soxr.
+        if (!string.IsNullOrEmpty(appFolder) && System.IO.Path.IsPathFullyQualified(appFolder))
+        {
+            yield return System.IO.Path.Combine(appFolder, ExecutableName);
         }
 
         foreach (var entry in (pathVariable ?? string.Empty).Split(System.IO.Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))

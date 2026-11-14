@@ -1,6 +1,8 @@
 #!/bin/bash
 # Builds PlexPod.app and PlexPod-<version>-arm64.dmg in installer/out-mac: a self-contained release
-# publish for Apple Silicon (no .NET needed on the Mac), wrapped in an app bundle and ad-hoc signed.
+# publish for Apple Silicon (no .NET needed on the Mac) plus PlexPod's own ffmpeg with soxr (D19,
+# installer/ffmpeg-mac/build-ffmpeg.sh), wrapped in an app bundle and ad-hoc signed. The ffmpeg source
+# archives land in installer/out-mac/ffmpeg-sources: upload them with every release (LGPL).
 # Not notarised (that needs an Apple Developer ID): the first launch needs right-click → Open, or
 # System Settings → Privacy & Security → Open Anyway. Run from anywhere: installer/build-mac.sh
 # Debug info is left out and source paths are mapped to /src, so no local paths end up in the binaries.
@@ -16,6 +18,9 @@ version="$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' "$project" | head -1)"
 
 command -v dotnet >/dev/null || export PATH="$HOME/.dotnet:$PATH"
 
+"$repo/installer/ffmpeg-mac/build-ffmpeg.sh"
+ffmpeg_dist="$repo/installer/ffmpeg-mac/build/dist"
+
 rm -rf "$out"
 dotnet publish "$project" -c Release -r osx-arm64 --self-contained true \
     -p:DebugType=none -p:DebugSymbols=false "-p:PathMap=$repo=/src" -p:ContinuousIntegrationBuild=true \
@@ -24,6 +29,13 @@ dotnet publish "$project" -c Release -r osx-arm64 --self-contained true \
 app="$out/PlexPod.app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp -R "$publish/." "$app/Contents/MacOS/"
+
+# The bundled ffmpeg sits next to the app's executable, where FfmpegLocator looks first.
+cp "$ffmpeg_dist/ffmpeg" "$app/Contents/MacOS/ffmpeg"
+mkdir -p "$app/Contents/Resources/ffmpeg"
+cp "$ffmpeg_dist/NOTICE.txt" "$ffmpeg_dist/COPYING.LGPLv2.1" "$app/Contents/Resources/ffmpeg/"
+mkdir -p "$out/ffmpeg-sources"
+cp "$ffmpeg_dist/sources/"* "$repo/installer/ffmpeg-mac/build-ffmpeg.sh" "$out/ffmpeg-sources/"
 
 # Icon: the app's PNG at every size iconutil expects.
 iconset="$out/PlexPod.iconset"
@@ -70,3 +82,4 @@ rm -rf "$staging" "$publish"
 
 echo "Built $app"
 echo "Built $dmg"
+echo "Upload with the release: $out/ffmpeg-sources/*"

@@ -71,7 +71,7 @@ PlexPod recognises those models (from the USB id, the iPod's SysInfo files or th
 - Windows 10 or 11 (64-bit), or a Mac with Apple silicon (macOS 13 or later)
 - A Plex Media Server with a music library
 - An iPod that works with PlexPod (see [Which iPods work](#which-ipods-work)), connected in disk mode
-- **ffmpeg** with soxr. Windows: `winget install Gyan.FFmpeg`. Mac: install [Homebrew](https://brew.sh), then `brew tap homebrew-ffmpeg/ffmpeg` and `brew install homebrew-ffmpeg/ffmpeg/ffmpeg --with-libsoxr` (Homebrew's plain `ffmpeg` has no soxr, so hi-res FLAC couldn't be converted). PlexPod finds it automatically.
+- On Windows, **ffmpeg** with soxr: `winget install Gyan.FFmpeg`. PlexPod finds it automatically. The Mac app includes its own ffmpeg, so there's nothing to install there.
 
 **Install it on Windows**
 
@@ -86,7 +86,7 @@ dotnet run --project src/PlexPod.App
 
 **Install it on a Mac**
 
-Download **PlexPod-x.y.z-arm64.dmg** from the [latest release](https://github.com/hyprninja/PlexPod/releases/latest), open it and drag **PlexPod** to Applications. It includes everything PlexPod needs. The app isn't notarised by Apple yet, so the first time, right-click it and choose **Open** (or allow it under **System Settings → Privacy & Security → Open Anyway**). From source: `dotnet run --project src/PlexPod.Mac`.
+Download **PlexPod-x.y.z-arm64.dmg** from the [latest release](https://github.com/hyprninja/PlexPod/releases/latest), open it and drag **PlexPod** to Applications. It includes everything PlexPod needs, ffmpeg too. The app isn't notarised by Apple yet, so the first time, right-click it and choose **Open** (or allow it under **System Settings → Privacy & Security → Open Anyway**). From source: `dotnet run --project src/PlexPod.Mac`; that finds ffmpeg as Windows does, so install one with soxr (`brew tap homebrew-ffmpeg/ffmpeg`, then `brew install homebrew-ffmpeg/ffmpeg/ffmpeg --with-libsoxr`; Homebrew's plain `ffmpeg` has no soxr).
 
 1. **Sign in with Plex.** Your browser opens Plex's own sign-in page; PlexPod never sees your password.
 2. PlexPod finds your server and loads your music library.
@@ -122,7 +122,7 @@ Download **PlexPod-x.y.z-arm64.dmg** from the [latest release](https://github.co
 dotnet build PlexPod.slnx -c Debug
 dotnet test  PlexPod.slnx
 ```
-To build the installer (WiX Toolset 5, restored as a local dotnet tool), run `installer\build.ps1`; it writes `installer\out\PlexPod-<version>-x64.msi`. On a Mac, `installer/build-mac.sh` writes `installer/out-mac/PlexPod.app` and `PlexPod-<version>-arm64.dmg`. The whole solution, including the WPF app, also compiles on a Mac; CI builds and tests on both.
+To build the installer (WiX Toolset 5, restored as a local dotnet tool), run `installer\build.ps1`; it writes `installer\out\PlexPod-<version>-x64.msi`. On a Mac, `installer/build-mac.sh` writes `installer/out-mac/PlexPod.app` and `PlexPod-<version>-arm64.dmg`, with PlexPod's own ffmpeg inside (built by `installer/ffmpeg-mac/build-ffmpeg.sh`: LGPL only, soxr linked in, macOS 13+; needs `brew install cmake`). Upload `installer/out-mac/ffmpeg-sources/*` with every release, as the LGPL asks. The whole solution, including the WPF app, also compiles on a Mac; CI builds and tests on both.
 .NET 10, WPF (Windows) and Avalonia (Mac) with the Fluent theme, CommunityToolkit.Mvvm, TagLibSharp and ffmpeg. The iPod database format follows [libgpod](https://github.com/gtkpod/libgpod). Design notes and milestone plans are in [`docs/`](docs/) and [`CLAUDE.md`](CLAUDE.md).
 
 <details>

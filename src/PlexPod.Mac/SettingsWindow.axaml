@@ -19,12 +19,12 @@
         <ScrollViewer VerticalScrollBarVisibility="Auto">
             <StackPanel>
                 <TextBlock Text="ffmpeg" Classes="heading" />
-                <TextBlock Text="Used to convert hi-res FLAC and to verify every file. PlexPod never downloads or bundles it. It needs soxr, which Homebrew's plain ffmpeg lacks: brew tap homebrew-ffmpeg/ffmpeg, then brew install homebrew-ffmpeg/ffmpeg/ffmpeg --with-libsoxr"
+                <TextBlock Text="Used to convert hi-res FLAC and to verify every file. PlexPod includes its own (with soxr); enter a path only to use a different one."
                            Classes="hint" Margin="0,2,0,6" />
                 <DockPanel>
                     <Button DockPanel.Dock="Right" Content="Detect" Command="{Binding DetectCommand}" Margin="8,0,0,0" />
                     <TextBox Text="{Binding FfmpegPath}"
-                             PlaceholderText="Leave empty to find ffmpeg automatically (PATH, then Homebrew)"
+                             PlaceholderText="Leave empty to use the ffmpeg included with PlexPod"
                              AutomationProperties.Name="ffmpeg path" />
                 </DockPanel>
                 <TextBlock Text="{Binding FfmpegStatus}" TextWrapping="Wrap" Margin="0,4,0,0" />
