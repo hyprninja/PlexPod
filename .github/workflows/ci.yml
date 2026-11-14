@@ -27,9 +27,12 @@ jobs:
           global-json-file: global.json
 
       # ffmpeg (with soxr) runs the conversion and end-to-end sync tests; without it they are skipped.
+      # Homebrew's own ffmpeg has no soxr (nor Vorbis); the homebrew-ffmpeg tap builds it with both.
       - name: Install ffmpeg (macOS)
         if: runner.os == 'macOS'
-        run: brew install ffmpeg
+        run: |
+          brew tap homebrew-ffmpeg/ffmpeg
+          brew install homebrew-ffmpeg/ffmpeg/ffmpeg --with-libsoxr
 
       - name: Install ffmpeg (Windows)
         if: runner.os == 'Windows'

@@ -71,7 +71,7 @@ PlexPod recognises those models (from the USB id, the iPod's SysInfo files or th
 - Windows 10 or 11 (64-bit), or a Mac with Apple silicon (macOS 13 or later)
 - A Plex Media Server with a music library
 - An iPod that works with PlexPod (see [Which iPods work](#which-ipods-work)), connected in disk mode
-- **ffmpeg** with soxr. Windows: `winget install Gyan.FFmpeg`. Mac: install [Homebrew](https://brew.sh), then `brew install ffmpeg`. PlexPod finds it automatically.
+- **ffmpeg** with soxr. Windows: `winget install Gyan.FFmpeg`. Mac: install [Homebrew](https://brew.sh), then `brew tap homebrew-ffmpeg/ffmpeg` and `brew install homebrew-ffmpeg/ffmpeg/ffmpeg --with-libsoxr` (Homebrew's plain `ffmpeg` has no soxr, so hi-res FLAC couldn't be converted). PlexPod finds it automatically.
 
 **Install it on Windows**
 

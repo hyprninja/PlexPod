@@ -47,7 +47,7 @@ churn every file. Nothing about the sync pipeline, its order or its invariants c
 | Drives | `DriveInfo` with drive letters | `DriveInfo` mounts under `/Volumes/`, network and read-only mounts skipped |
 | Unbuffered read-back (D6) | `FILE_FLAG_NO_BUFFERING` | `F_NOCACHE` on both the write and the read-back handle, so the hash is computed from the disk ⚠️ |
 | USB product id (signed-database check) | registry | none for now: no USB evidence, the file evidence still applies (the iPod Video has none either way) |
-| ffmpeg | settings → `PATH` → winget | settings → `PATH` → `/opt/homebrew/bin`, `/usr/local/bin` (apps opened from Finder don't get the shell's `PATH`). Homebrew's ffmpeg is built with soxr ⚠️ |
+| ffmpeg | settings → `PATH` → winget | settings → `PATH` → `/opt/homebrew/bin`, `/usr/local/bin` (apps opened from Finder don't get the shell's `PATH`). ✅ Homebrew's own ffmpeg (9.0.2) has **no soxr** (nor Vorbis), so PlexPod refuses hi-res FLAC with it; the `homebrew-ffmpeg/ffmpeg` tap with `--with-libsoxr` has both (CI uses it) |
 | App data | `%LOCALAPPDATA%\PlexPod\` | `~/Library/Application Support/PlexPod/` (what .NET returns for LocalApplicationData on macOS) |
 | Reveal folder / open browser | `explorer.exe` / shell execute | `open` |
 | Package | WiX MSI | `PlexPod.app` (self-contained, osx-arm64, ad-hoc signed) in a `.dmg`; not notarised (§10) |

@@ -49,5 +49,5 @@ public static class PlatformText
 
     public static string FfmpegMissing => OperatingSystem.IsWindows()
         ? "ffmpeg not found. Install it (winget install Gyan.FFmpeg) or enter the path to ffmpeg.exe."
-        : "ffmpeg not found. Install it with Homebrew (brew install ffmpeg) or enter the path to ffmpeg.";
+        : "ffmpeg not found. Install it with soxr: brew tap homebrew-ffmpeg/ffmpeg, then brew install homebrew-ffmpeg/ffmpeg/ffmpeg --with-libsoxr (Homebrew's plain ffmpeg has no soxr). Or enter the path to ffmpeg.";
 }

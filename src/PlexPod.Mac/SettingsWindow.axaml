@@ -19,7 +19,7 @@
         <ScrollViewer VerticalScrollBarVisibility="Auto">
             <StackPanel>
                 <TextBlock Text="ffmpeg" Classes="heading" />
-                <TextBlock Text="Used to convert hi-res FLAC and to verify every file. PlexPod never downloads or bundles it. Install it with Homebrew: brew install ffmpeg"
+                <TextBlock Text="Used to convert hi-res FLAC and to verify every file. PlexPod never downloads or bundles it. It needs soxr, which Homebrew's plain ffmpeg lacks: brew tap homebrew-ffmpeg/ffmpeg, then brew install homebrew-ffmpeg/ffmpeg/ffmpeg --with-libsoxr"
                            Classes="hint" Margin="0,2,0,6" />
                 <DockPanel>
                     <Button DockPanel.Dock="Right" Content="Detect" Command="{Binding DetectCommand}" Margin="8,0,0,0" />
