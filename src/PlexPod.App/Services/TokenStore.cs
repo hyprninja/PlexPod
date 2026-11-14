@@ -9,7 +9,7 @@ namespace PlexPod.App.Services;
 /// The Plex account token, encrypted with DPAPI for the current Windows user in <c>token.bin</c>.
 /// Never written in plaintext and never logged.
 /// </summary>
-public sealed class TokenStore(AppPaths paths, ILogger<TokenStore> logger)
+public sealed class TokenStore(AppPaths paths, ILogger<TokenStore> logger) : ITokenStore
 {
     private static readonly byte[] Entropy = "PlexPod.PlexToken.v1"u8.ToArray();
 

@@ -1,6 +1,5 @@
 using System.IO;
 using System.Net.Http;
-using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Logging;
@@ -33,6 +32,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private readonly Debouncer _recalc;
     private readonly HashSet<string> _enrichAttempted = new(StringComparer.Ordinal);
 
+    private readonly IUiThread _ui;
     private CancellationTokenSource _loadCts = new();
     private CancellationTokenSource? _enrichCts;
     private bool _initialized;
@@ -54,8 +54,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         SettingsStore settings,
         LibraryState library,
         ConversionCache conversions,
+        IUiThread ui,
         ILogger<MainViewModel> logger)
     {
+        _ui = ui;
         SignIn = signIn;
         Server = server;
         Device = device;
@@ -64,7 +66,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         Settings = settingsView;
         Export = export;
         Sync = sync;
-        gate.Changed += (_, _) => Application.Current?.Dispatcher.BeginInvoke(() =>
+        gate.Changed += (_, _) => _ui.Post(() =>
         {
             Export.ExportCommand.NotifyCanExecuteChanged();
             Sync.SyncCommand.NotifyCanExecuteChanged();
@@ -337,7 +339,6 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         var selectedFirst = snapshot.Playlists
             .OrderByDescending(p => Selection.Playlists.Checked.Any(c => c.Key == p.RatingKey))
             .ToList();
-        var dispatcher = Application.Current.Dispatcher;
         var contentsMap = _library.PlaylistContents;
 
         await Parallel.ForEachAsync(
@@ -349,7 +350,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 {
                     var contents = await client.GetPlaylistContentsAsync(playlist, token);
                     contentsMap[playlist.RatingKey] = contents;
-                    await dispatcher.InvokeAsync(() =>
+                    await _ui.InvokeAsync(() =>
                     {
                         // The user may have switched server or section meanwhile; rating keys repeat across
                         // servers, so a late answer must not land on the new library's rows.
@@ -500,7 +501,6 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
         var cts = CancellationTokenSource.CreateLinkedTokenSource(_loadCts.Token);
         var overrides = _library.FormatOverrides;
-        var dispatcher = Application.Current.Dispatcher;
         _enrichCts = cts;
         _ = Task.Run(async () =>
         {
@@ -509,7 +509,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 foreach (var batch in todo.Chunk(EnrichBatchSize))
                 {
                     await _enricher.EnrichAsync(client, batch, (key, format) => overrides[key] = format, cts.Token);
-                    await dispatcher.InvokeAsync(ScheduleRecalc);
+                    await _ui.InvokeAsync(ScheduleRecalc);
                 }
             }
             catch (OperationCanceledException)

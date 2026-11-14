@@ -23,14 +23,7 @@
     <ProjectReference Include="..\..\src\PlexPod.Plex\PlexPod.Plex.csproj" />
     <ProjectReference Include="..\..\src\PlexPod.Device\PlexPod.Device.csproj" />
     <ProjectReference Include="..\..\src\PlexPod.Media\PlexPod.Media.csproj" />
-  </ItemGroup>
-
-  <ItemGroup Condition="'$(OS)' == 'Windows_NT'">
-    <ProjectReference Include="..\..\src\PlexPod.App\PlexPod.App.csproj" />
-  </ItemGroup>
-
-  <ItemGroup Condition="'$(OS)' != 'Windows_NT'">
-    <Compile Remove="App\**" />
+    <ProjectReference Include="..\..\src\PlexPod.App.Shared\PlexPod.App.Shared.csproj" />
   </ItemGroup>
 
   <ItemGroup>

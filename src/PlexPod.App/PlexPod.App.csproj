@@ -25,6 +25,7 @@
     <ProjectReference Include="..\PlexPod.Plex\PlexPod.Plex.csproj" />
     <ProjectReference Include="..\PlexPod.Device\PlexPod.Device.csproj" />
     <ProjectReference Include="..\PlexPod.Media\PlexPod.Media.csproj" />
+    <ProjectReference Include="..\PlexPod.App.Shared\PlexPod.App.Shared.csproj" />
   </ItemGroup>
 
   <ItemGroup>

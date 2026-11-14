@@ -1,5 +1,3 @@
-using System.ComponentModel;
-using System.Windows.Data;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using PlexPod.Core.Models;
@@ -39,7 +37,10 @@ public sealed partial class PickerItemViewModel(string key, string guid, string 
     partial void OnIsCheckedChanged(bool value) => Owner?.OnItemChecked();
 }
 
-/// <summary>A filterable, virtualised list of picker rows with Select all / Clear.</summary>
+/// <summary>
+/// A filterable list of picker rows with Select all / Clear. <see cref="View"/> is the rows that match
+/// the filter, rebuilt when the filter or the items change; the UI virtualises it.
+/// </summary>
 public sealed partial class PickerListViewModel : ObservableObject
 {
     private int _suppress;
@@ -47,7 +48,6 @@ public sealed partial class PickerListViewModel : ObservableObject
     public PickerListViewModel(string header)
     {
         Header = header;
-        View = CollectionViewSource.GetDefaultView(Items);
     }
 
     public event EventHandler? Changed;
@@ -57,7 +57,7 @@ public sealed partial class PickerListViewModel : ObservableObject
     public IReadOnlyList<PickerItemViewModel> Items { get; private set; } = [];
 
     [ObservableProperty]
-    public partial ICollectionView View { get; private set; }
+    public partial IReadOnlyList<PickerItemViewModel> View { get; private set; } = [];
 
     [ObservableProperty]
     public partial string FilterText { get; set; } = string.Empty;
@@ -80,8 +80,7 @@ public sealed partial class PickerListViewModel : ObservableObject
         }
 
         Items = items;
-        var view = new ListCollectionView(items.ToList()) { Filter = Matches };
-        View = view;
+        View = Filtered();
         UpdateCount();
     }
 
@@ -108,7 +107,7 @@ public sealed partial class PickerListViewModel : ObservableObject
     private void SelectAll() =>
         Bulk(() =>
         {
-            foreach (var item in View.Cast<PickerItemViewModel>())
+            foreach (var item in View)
             {
                 item.IsChecked = true;
             }
@@ -118,13 +117,13 @@ public sealed partial class PickerListViewModel : ObservableObject
     private void Clear() =>
         Bulk(() =>
         {
-            foreach (var item in View.Cast<PickerItemViewModel>())
+            foreach (var item in View)
             {
                 item.IsChecked = false;
             }
         });
 
-    partial void OnFilterTextChanged(string value) => View.Refresh();
+    partial void OnFilterTextChanged(string value) => View = Filtered();
 
     partial void OnCheckedCountChanged(int value) => OnPropertyChanged(nameof(HeaderText));
 
@@ -146,7 +145,14 @@ public sealed partial class PickerListViewModel : ObservableObject
 
     private void UpdateCount() => CheckedCount = Items.Count(i => i.IsChecked);
 
-    private bool Matches(object obj) =>
-        string.IsNullOrWhiteSpace(FilterText)
-        || (obj is PickerItemViewModel item && item.SearchText.Contains(FilterText.Trim(), StringComparison.CurrentCultureIgnoreCase));
+    private List<PickerItemViewModel> Filtered()
+    {
+        if (string.IsNullOrWhiteSpace(FilterText))
+        {
+            return [.. Items];
+        }
+
+        var filter = FilterText.Trim();
+        return Items.Where(item => item.SearchText.Contains(filter, StringComparison.CurrentCultureIgnoreCase)).ToList();
+    }
 }

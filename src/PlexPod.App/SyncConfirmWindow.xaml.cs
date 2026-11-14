@@ -1,5 +1,5 @@
 using System.Windows;
-using PlexPod.App.ViewModels;
+using PlexPod.App.Services;
 
 namespace PlexPod.App;
 
@@ -13,13 +13,13 @@ public partial class SyncConfirmWindow : Window
 /// <summary>Shows the sync plan in a modal dialog owned by the main window.</summary>
 public sealed class SyncConfirmation : ISyncConfirmation
 {
-    public bool Confirm(string title, string summary, bool canStart)
+    public Task<bool> ConfirmAsync(string title, string summary, bool canStart)
     {
         var window = new SyncConfirmWindow { Owner = Application.Current.MainWindow };
         window.Heading.Text = title;
         window.Summary.Text = summary;
         window.StartButton.Visibility = canStart ? Visibility.Visible : Visibility.Collapsed;
         window.CloseButton.Content = canStart ? "Cancel" : "Close";
-        return window.ShowDialog() == true;
+        return Task.FromResult(window.ShowDialog() == true);
     }
 }
