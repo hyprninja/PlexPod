@@ -41,7 +41,7 @@ public partial class App : Application
         services.AddSingleton(sp => new PlexClientOptions
         {
             ClientIdentifier = sp.GetRequiredService<SettingsStore>().Current.ClientIdentifier,
-            Version = typeof(App).Assembly.GetName().Version?.ToString(3) ?? "1.0.2",
+            Version = typeof(App).Assembly.GetName().Version?.ToString(3) ?? "1.1.0",
         });
         services.AddPlexPodPlex();
         services.AddPlexPodDevice();

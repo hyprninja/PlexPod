@@ -1,0 +1,42 @@
+# Builds the Windows installer (WiX needs Windows) when a GitHub release is published, and attaches
+# PlexPod-<version>-x64.msi to it. The Mac installer is built on a Mac with installer/build-mac.sh and
+# uploaded with its ffmpeg source archives. Re-run for an existing release from the Actions tab.
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to build and attach the Windows installer to (e.g. v1.1.0)
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  windows-installer:
+    runs-on: windows-latest
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: 1
+      DOTNET_NOLOGO: 1
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Build the MSI
+        shell: pwsh
+        run: ./installer/build.ps1
+
+      - name: Attach it to the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload $env:TAG (Get-ChildItem installer/out/PlexPod-*-x64.msi).FullName --clobber

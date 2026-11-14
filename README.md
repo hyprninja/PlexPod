@@ -106,7 +106,7 @@ Download **PlexPod-x.y.z-arm64.dmg** from the [latest release](https://github.co
 - [x] Sync engine with verified copies and unbreakable playlists
 - [x] Play counts and ratings from the iPod back to Plex
 - [x] Apple's stock firmware alongside Rockbox, detected automatically
-- [ ] The Mac app (built; being checked on the real iPod)
+- [x] The Mac app (1.1.0; still to be checked by the owner on the real iPod)
 - [ ] Covers on older iPods' Apple firmware (their thumbnail sizes)
 - [ ] Apple's firmware on the iPod Classic (the signed "hash58" database)
 - [ ] Tray icon, automatic sync when the iPod is plugged in, Last.fm scrobbling
