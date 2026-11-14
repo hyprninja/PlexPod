@@ -18,6 +18,18 @@ public sealed class MacFactAttribute : FactAttribute
     }
 }
 
+/// <summary>A theory that only means something on macOS; skipped elsewhere.</summary>
+public sealed class MacTheoryAttribute : TheoryAttribute
+{
+    public MacTheoryAttribute()
+    {
+        if (!OperatingSystem.IsMacOS())
+        {
+            Skip = "macOS only.";
+        }
+    }
+}
+
 /// <summary>macOS handling that runs on every OS (pure logic and temp folders).</summary>
 public sealed class MacFileSystemTests : IDisposable
 {
@@ -86,7 +98,8 @@ public sealed class MacFileSystemTests : IDisposable
         Assert.Equal(["/Music/A/01 a.flac"], DeviceFileOps.ListFiles(_root, "Music"));
     }
 
-    [Theory]
+    // Mac only: the path is resolved with the host's Path.GetFullPath, which on Windows prefixes a drive.
+    [MacTheory]
     [InlineData("/Volumes/IPOD/Music/export", "/Volumes/IPOD")]
     [InlineData("/Volumes/IPOD", "/Volumes/IPOD")]
     [InlineData("/Volumes/My iPod/x", "/Volumes/My iPod")]
