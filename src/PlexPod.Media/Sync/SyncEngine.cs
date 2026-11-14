@@ -317,7 +317,7 @@ public sealed class SyncEngine(
     private async Task PreflightAsync(Run run)
     {
         var request = run.Preview.Request;
-        run.Report("Preparing", 0, 0, request.DriveRoot);
+        run.Report(SyncPhase.Preparing, 0, 0, request.DriveRoot);
         var identity = await run.Store.LoadOrCreateIdentityAsync(request.VolumeLabel, request.RockboxTarget, CancellationToken.None).ConfigureAwait(false);
         if (run.Preview.Identity is { } seen && seen.DeviceId != identity.DeviceId)
         {
@@ -370,9 +370,9 @@ public sealed class SyncEngine(
             return;
         }
 
-        run.Report("Sending plays to Plex", 0, 0, string.Empty);
+        run.Report(SyncPhase.SendingPlays, 0, 0, string.Empty);
         var fresh = await stats.PreviewAsync(request.DriveRoot, run.Preview.Manifest, options, PlexHasRating(request.Snapshot), run.Stop).ConfigureAwait(false);
-        var sending = new Progress<(int Done, int Total)>(p => run.Report("Sending plays to Plex", p.Done, p.Total, string.Empty));
+        var sending = new Progress<(int Done, int Total)>(p => run.Report(SyncPhase.SendingPlays, p.Done, p.Total, string.Empty));
         run.Stats = await stats.SendAsync(fresh, request.DriveRoot, run.State.DeviceId, request.Client, run.Stop, sending).ConfigureAwait(false);
     }
 
@@ -482,7 +482,7 @@ public sealed class SyncEngine(
     private async Task StockStatsAsync(Run run)
     {
         var request = run.Preview.Request;
-        run.Report("Reading plays on the iPod", 0, 0, string.Empty);
+        run.Report(SyncPhase.ReadingPlays, 0, 0, string.Empty);
         var state = await run.Store.LoadStatsAsync(CancellationToken.None).ConfigureAwait(false);
         var pendingPlays = new Dictionary<string, int>(state.PendingPlays, StringComparer.Ordinal);
         var pendingRatings = new Dictionary<string, int>(state.PendingRatings, StringComparer.Ordinal);
@@ -551,7 +551,7 @@ public sealed class SyncEngine(
             return;
         }
 
-        run.Report("Sending plays to Plex", 0, 0, string.Empty);
+        run.Report(SyncPhase.SendingPlays, 0, 0, string.Empty);
         int plays = 0, ratings = 0;
         string? error = null;
         var hasRating = PlexHasRating(request.Snapshot);
@@ -637,7 +637,7 @@ public sealed class SyncEngine(
     /// </summary>
     private async Task WriteStockDatabaseAsync(Run run, bool interim)
     {
-        run.Report("Writing the iPod's library", 0, 1, string.Empty);
+        run.Report(SyncPhase.WritingLibrary, 0, 1, string.Empty);
         var failures = new List<string>();
         var warnings = new List<string>();
         var previous = TryReadDatabase(run.Root, warnings);
@@ -706,7 +706,7 @@ public sealed class SyncEngine(
     /// </summary>
     private async Task<StockArtwork?> WriteStockArtworkAsync(Run run, ItdbLibrary library)
     {
-        run.Report("Writing album art", 0, library.Tracks.Count, string.Empty);
+        run.Report(SyncPhase.WritingArt, 0, library.Tracks.Count, string.Empty);
         var staging = Directory.CreateDirectory(Path.Combine(paths.CacheRoot, "sync-staging")).FullName;
         var formats = ArtworkFormat.IpodVideo;
         var temps = formats.ToDictionary(f => f.FormatId, f => Path.Combine(staging, Guid.NewGuid().ToString("N") + ".ithmb"));
@@ -869,7 +869,7 @@ public sealed class SyncEngine(
     /// <summary>P6 for the stock firmware: the database on the iPod reads back, and every file it names is there.</summary>
     private bool VerifyStockDatabase(Run run)
     {
-        run.Report("Checking the iPod's library", 0, 1, string.Empty);
+        run.Report(SyncPhase.CheckingLibrary, 0, 1, string.Empty);
         var problems = new List<string>();
         var local = DevicePaths.ToLocal(run.Root, DevicePaths.ItunesDbPath);
         if (!File.Exists(local))
@@ -924,7 +924,7 @@ public sealed class SyncEngine(
         foreach (var op in moves)
         {
             var existing = run.State.Tracks.GetValueOrDefault(op.Existing!.DevicePath) ?? op.Existing;
-            run.Report("Moving", done, moves.Count, op.DevicePath);
+            run.Report(SyncPhase.Moving, done, moves.Count, op.DevicePath);
             if (!string.Equals(existing.DevicePath, op.DevicePath, StringComparison.Ordinal))
             {
                 foreach (var folder in files.Move(run.Root, existing.DevicePath, op.DevicePath))
@@ -970,7 +970,7 @@ public sealed class SyncEngine(
                 return;
             }
 
-            run.Report("Checking tags", checkedCount++, candidates.Count, op.Target.Track.Title);
+            run.Report(SyncPhase.CheckingTags, checkedCount++, candidates.Count, op.Target.Track.Title);
             var existing = run.State.Tracks[op.DevicePath];
             AlbumDetail album;
             ArtistDetail? artist;
@@ -1058,7 +1058,7 @@ public sealed class SyncEngine(
                         continue; // drain: discard anything produced after Stop
                     }
 
-                    run.Report("Copying to iPod", done, total, op.DevicePath);
+                    run.Report(SyncPhase.Copying, done, total, op.DevicePath);
                     await CommitTrackAsync(run, op, processed).ConfigureAwait(false);
                     done++;
                     await run.SaveIfDueAsync().ConfigureAwait(false);
@@ -1229,7 +1229,7 @@ public sealed class SyncEngine(
         var done = 0;
         foreach (var op in ops)
         {
-            run.Report("Writing playlists", done++, ops.Count, op.Target.Playlist.Title);
+            run.Report(SyncPhase.WritingPlaylists, done++, ops.Count, op.Target.Playlist.Title);
 
             // P1: a playlist is never written partially. If any of its available tracks failed this
             // sync, the previous version stays (its tracks are all still on the iPod).
@@ -1276,7 +1276,7 @@ public sealed class SyncEngine(
     /// </summary>
     private bool VerifyPlaylists(Run run)
     {
-        run.Report("Checking playlists", 0, 1, string.Empty);
+        run.Report(SyncPhase.CheckingPlaylists, 0, 1, string.Empty);
         var removing = run.Preview.Plan.PlaylistRemovals.Select(p => p.DevicePath).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var problems = new PlaylistVerifier().Verify(run.Root, run.State.Playlists.Keys.Where(p => !removing.Contains(p)));
         if (problems.Count == 0)
@@ -1301,7 +1301,7 @@ public sealed class SyncEngine(
         var done = 0;
         foreach (var removal in removals)
         {
-            run.Report("Removing", done++, removals.Count, removal.DevicePath);
+            run.Report(SyncPhase.Removing, done++, removals.Count, removal.DevicePath);
             if (!run.State.Tracks.TryGetValue(removal.DevicePath, out var owned) || owned.RatingKey != removal.RatingKey)
             {
                 continue; // already gone, or the path now belongs to another track
@@ -1354,7 +1354,7 @@ public sealed class SyncEngine(
 
     private async Task<SyncResult> CommitAsync(Run run, bool completed)
     {
-        run.Report("Finishing", 0, 0, string.Empty);
+        run.Report(SyncPhase.Finishing, 0, 0, string.Empty);
         await run.SaveAsync().ConfigureAwait(false);
         await run.Store.WriteTextAsync(SelectionFileName, JsonSerializer.Serialize(run.Preview.Request.Profile, Json), CancellationToken.None).ConfigureAwait(false);
         await run.Store.WriteTextAsync(NotOursFileName, JsonSerializer.Serialize(run.Preview.NotOurs, Json), CancellationToken.None).ConfigureAwait(false);
@@ -1631,7 +1631,7 @@ public sealed class SyncEngine(
 
         public long BytesWritten { get; set; }
 
-        public void Report(string phase, int done, int total, string current) =>
+        public void Report(SyncPhase phase, int done, int total, string current) =>
             _progress?.Report(new SyncProgress(phase, done, total, current, BytesWritten));
 
         public void CheckStop()

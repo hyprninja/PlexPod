@@ -20,7 +20,7 @@ namespace PlexPod.App.ViewModels;
 /// <summary>
 /// The Sync button (M3): preview (read-only) → confirm → execute with progress and a safe Stop.
 /// Also reads what PlexPod already owns on the iPod, so the capacity bar counts it as available,
-/// and offers Send plays now (M4).
+/// and offers Send plays now (M4). <see cref="Activity"/> is the state machine (docs/state-machines.md §1).
 /// </summary>
 public sealed partial class SyncViewModel(
     SyncEngine engine,
@@ -46,6 +46,16 @@ public sealed partial class SyncViewModel(
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(SyncCommand))]
     public partial bool HasSelection { get; private set; }
+
+    public const string StoppingText = "Stopping after the current file…";
+
+    /// <summary>What the sync area is doing. Changed only by <see cref="MoveTo"/>.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsStopping))]
+    public partial SyncActivity Activity { get; private set; }
+
+    /// <summary>Stop was pressed and the sync is finishing the file it is writing.</summary>
+    public bool IsStopping => Activity == SyncActivity.Stopping;
 
     [ObservableProperty]
     public partial double ProgressValue { get; private set; }
@@ -131,10 +141,23 @@ public sealed partial class SyncViewModel(
             return;
         }
 
+        MoveTo(SyncActivity.Planning);
+        try
+        {
+            await PlanConfirmAndRunAsync(client, snapshot, ipod, ffmpeg, stop);
+        }
+        finally
+        {
+            MoveTo(SyncActivity.Idle);
+        }
+    }
+
+    private async Task PlanConfirmAndRunAsync(PlexPod.Plex.Library.IPlexLibraryClient client, LibrarySnapshot snapshot, IpodDevice ipod, PlexPod.Media.Ffmpeg.FfmpegInstall ffmpeg, CancellationToken stop)
+    {
         ProgressValue = 0;
         ProgressText = "Planning the sync (reading the iPod, comparing with Plex)…";
         var request = new SyncRequest(ipod.DriveRoot, ipod.VolumeLabel, ipod.RockboxTarget, client, ffmpeg, snapshot, _selection,
-            library.PlaylistContents, library.FormatOverrides, library.KnownSizes, settings.Policy, _profile, settings.StatsOptions, ipod.Firmware,
+            library.PlaylistContents, library.FormatOverrides, library.KnownSizes, settings.Policy, _profile!, settings.StatsOptions, ipod.Firmware,
             ipod.SignedDatabase);
 
         SyncPreview preview;
@@ -157,30 +180,46 @@ public sealed partial class SyncViewModel(
 
         // Plays waiting, or a stock library to rebuild, are reason enough to run a sync whose file plan is empty.
         var nothingToDo = !preview.HasWork;
+        MoveTo(SyncActivity.Confirming);
         if (!await confirmation.ConfirmAsync(nothingToDo ? "Already in sync" : "Ready to sync", Summarise(preview), preview.CanStart && !nothingToDo))
         {
             ProgressText = nothingToDo ? "The iPod already matches your selection." : "Sync cancelled; nothing was changed.";
             return;
         }
 
+        MoveTo(SyncActivity.Syncing);
+
+        // Stop is pressed on the UI thread, so this runs there at once: the user sees it was heard even
+        // while a large file finishes copying.
+        using var stopping = stop.Register(() =>
+        {
+            if (Activity == SyncActivity.Syncing)
+            {
+                MoveTo(SyncActivity.Stopping);
+                ProgressText = StoppingText;
+            }
+        });
+
         var progress = new Progress<SyncProgress>(p =>
         {
             ProgressValue = p.Total > 0 ? (double)p.Done / p.Total : 0;
-            ProgressText = $"{p.Phase}{(p.Total > 0 ? $" {p.Done:N0}/{p.Total:N0}" : string.Empty)}: {p.Current}  ·  {Format.Bytes(p.BytesWritten)} written";
+            var line = $"{p.PhaseText}{(p.Total > 0 ? $" {p.Done:N0}/{p.Total:N0}" : string.Empty)}: {p.Current}  ·  {Format.Bytes(p.BytesWritten)} written";
+            ProgressText = IsStopping ? $"{StoppingText} {line}" : line;
         });
 
         try
         {
             var result = await Task.Run(() => engine.ExecuteAsync(preview, progress, stop), CancellationToken.None);
             ProgressValue = 1;
-            ProgressText = (result.Completed
-                ? preview.IsStock
-                    ? $"Sync complete: {result.Added:N0} added, {result.Retagged + result.Replaced:N0} updated, {result.Removed:N0} removed ({Format.Bytes(result.BytesWritten)}, {result.Elapsed:mm\\:ss}). The iPod's library is rebuilt: eject it before unplugging."
-                    : $"Sync complete: {result.Added:N0} added, {result.Retagged + result.Replaced:N0} updated, {result.Removed:N0} removed, {result.PlaylistsWritten:N0} playlists written ({Format.Bytes(result.BytesWritten)}, {result.Elapsed:mm\\:ss}). Run Database → Update Now on the iPod."
-                : result.Stopped
-                    ? "Sync stopped. The iPod is consistent; press Sync again to finish."
-                    : $"Sync finished with {result.Failures.Count:N0} problem(s). Details: /.plexpod/{SyncEngine.ReportFileName} on the iPod.")
-                + StatsNote(result.Stats);
+            ProgressText = result.Outcome switch
+            {
+                SyncOutcome.Complete when preview.IsStock =>
+                    $"Sync complete: {result.Added:N0} added, {result.Retagged + result.Replaced:N0} updated, {result.Removed:N0} removed ({Format.Bytes(result.BytesWritten)}, {result.Elapsed:mm\\:ss}). The iPod's library is rebuilt: eject it before unplugging.",
+                SyncOutcome.Complete =>
+                    $"Sync complete: {result.Added:N0} added, {result.Retagged + result.Replaced:N0} updated, {result.Removed:N0} removed, {result.PlaylistsWritten:N0} playlists written ({Format.Bytes(result.BytesWritten)}, {result.Elapsed:mm\\:ss}). Run Database → Update Now on the iPod.",
+                SyncOutcome.Stopped => "Sync stopped. The iPod is consistent; press Sync again to finish.",
+                _ => $"Sync finished with {result.Failures.Count:N0} problem(s). Details: /.plexpod/{SyncEngine.ReportFileName} on the iPod.",
+            } + StatsNote(result.Stats);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -215,6 +254,19 @@ public sealed partial class SyncViewModel(
             return;
         }
 
+        MoveTo(SyncActivity.SendingPlays);
+        try
+        {
+            await SendPlaysAsync(client, snapshot, ipod, stop);
+        }
+        finally
+        {
+            MoveTo(SyncActivity.Idle);
+        }
+    }
+
+    private async Task SendPlaysAsync(PlexPod.Plex.Library.IPlexLibraryClient client, LibrarySnapshot snapshot, IpodDevice ipod, CancellationToken stop)
+    {
         ProgressValue = 0;
         ProgressText = "Reading plays on the iPod…";
         var options = new StatsOptions(settings.RatingMode);
@@ -235,6 +287,22 @@ public sealed partial class SyncViewModel(
             logger.LogError(ex, "Send plays now failed");
             ProgressText = $"Couldn't send plays: {ex.Message}";
         }
+    }
+
+    /// <summary>The one place <see cref="Activity"/> changes. A move the table doesn't allow is logged, never thrown: a modelling slip must not break a sync.</summary>
+    private void MoveTo(SyncActivity next)
+    {
+        if (next == Activity)
+        {
+            return;
+        }
+
+        if (!SyncActivities.CanMove(Activity, next))
+        {
+            logger.LogWarning("Unexpected sync state change {From} → {To}", Activity, next);
+        }
+
+        Activity = next;
     }
 
     private static string StatsNote(StatsResult? stats) => stats switch
@@ -287,6 +355,13 @@ public sealed partial class SyncViewModel(
 
         if (preview.Blockers.Count > 0)
         {
+            b.AppendLine();
+        }
+
+        if (preview.MissingSoxr)
+        {
+            b.AppendLine($"⚠ {Format.Count(preview.TracksNeedingResample, "hi-res FLAC track")} need converting to 44.1 kHz, but this ffmpeg has no soxr resampler. "
+                + "Any not converted before will fail, and playlists holding them keep their previous version. Install an ffmpeg with soxr (see Settings) to sync them.");
             b.AppendLine();
         }
 
