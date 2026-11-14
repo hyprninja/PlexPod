@@ -11,6 +11,7 @@ PlexPod is a **desktop app for Windows (.NET 10, WPF, Fluent theme) and macOS (A
 ## Read these first
 | File | What's in it |
 |---|---|
+| `docs/state-machines.md` | Every workflow's states and transitions (sync activity, outcome and phases, sign-in, Plex library, ffmpeg, and the persisted ones), with diagrams. Update it when a workflow changes |
 | `docs/M7-plan.md` | Milestone 7 (in progress): the Mac app, macOS hazards on the iPod's FAT32 (`._` twins, NFD listings), owner decisions D16–D18 |
 | `docs/M6-plan.md` | Milestone 6 (done, verified in the car): stock Apple firmware (for the car) alongside Rockbox, detected automatically: iTunesDB, Fxx layout, ALAC, Play Counts, artwork; owner decisions D12–D15 |
 | `docs/M4-plan.md` | Milestone 4 (implemented, owner verification pending): stats return, Rockbox playback log + database changelog → Plex plays and ratings, owner decisions D8–D11 |
@@ -60,6 +61,7 @@ Status markers in those docs: ✅ verified from a primary source · ⚠️ infer
 - Tests: xUnit; Plex tests use a fake `HttpMessageHandler` + JSON fixtures; device tests use temp directories as fake drives.
 - App data: `%LOCALAPPDATA%\PlexPod\` (`settings.json`, `token.bin`, `logs\`, `cache\` = `work\`, `converted\`, `art\`).
 - `PlexPod.Media` multi-targets `net10.0-windows` (WIC for baseline JPEG art) and `net10.0` (macOS ImageIO), behind `Art/ImageCodec.*.cs`. The test project is `net10.0-windows` on Windows and `net10.0` elsewhere. `EnableWindowsTargeting` lets the WPF projects compile on a Mac. ffmpeg is found, never bundled (settings path → PATH → winget on Windows, Homebrew/MacPorts folders on macOS).
+- **State machines are explicit** (`docs/state-machines.md`): a workflow whose state would otherwise live in several flags or free text gets one enum, changed in one place (`MoveTo`/a single setter), with the old flags derived from it and its transitions tested. UI text comes from the state, not the other way round. Persisted on-iPod state (manifest journal, stats) follows the M3/M4/M6 plans instead.
 - View models live in `PlexPod.App.Shared` (no UI framework); each app implements `IUiThread`, `ITokenStore` (DPAPI file / Keychain), `IFolderPicker`, `ISyncConfirmation` (`Services/PlatformSeams.cs`). Mac app data: `~/Library/Application Support/PlexPod/`.
 - Edit source files with tools that keep UTF-8 intact. Windows PowerShell 5.1's `Get-Content`/`Set-Content` without `-Encoding` re-encodes non-ASCII text (… — → ✓) and corrupts it.
 

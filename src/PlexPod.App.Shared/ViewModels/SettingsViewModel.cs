@@ -26,6 +26,20 @@ public sealed partial class TagFieldViewModel(TagField field, bool isOn, Action 
     partial void OnIsOnChanged(bool value) => changed();
 }
 
+/// <summary>Whether a usable ffmpeg was found (docs/state-machines.md §6).</summary>
+public enum FfmpegState
+{
+    /// <summary>Not looked yet, or looking now.</summary>
+    Detecting,
+
+    Missing,
+
+    /// <summary>Found, but without soxr: copies and verification work; FLAC above 44.1 kHz can't be converted.</summary>
+    NoSoxr,
+
+    Ready,
+}
+
 /// <summary>ffmpeg location, conversion-cache cap, the per-field tag policy (D4) and stats return (D10, D11). Saved on change.</summary>
 public sealed partial class SettingsViewModel : ObservableObject
 {
@@ -33,6 +47,7 @@ public sealed partial class SettingsViewModel : ObservableObject
     private readonly FfmpegLocator _locator;
     private readonly ConversionCache _cache;
     private bool _loading;
+    private Task? _detecting;
 
     public SettingsViewModel(SettingsStore settings, FfmpegLocator locator, ConversionCache cache)
     {
@@ -85,6 +100,10 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     public FfmpegInstall? Ffmpeg { get; private set; }
 
+    /// <summary>Set only by detection; <see cref="Ffmpeg"/> is the install it found.</summary>
+    [ObservableProperty]
+    public partial FfmpegState FfmpegState { get; private set; }
+
     [ObservableProperty]
     public partial string FfmpegPath { get; set; }
 
@@ -120,11 +139,40 @@ public sealed partial class SettingsViewModel : ObservableObject
     /// <summary>What a sync sends to Plex first, as saved; null when stats return is switched off.</summary>
     public StatsOptions? StatsOptions => _settings.Current.StatsReturn ? new StatsOptions(RatingMode) : null;
 
+    /// <summary>
+    /// Looks for ffmpeg. One detection at a time: a caller arriving while one runs (a sync pressed during
+    /// the start-up detection) waits for that one instead of starting another.
+    /// </summary>
     [RelayCommand]
-    public async Task DetectAsync()
+    public Task DetectAsync()
     {
+        if (_detecting is { IsCompleted: false } running)
+        {
+            return running;
+        }
+
+        _detecting = DetectNowAsync();
+        return _detecting;
+    }
+
+    private async Task DetectNowAsync()
+    {
+        FfmpegState = FfmpegState.Detecting;
         FfmpegStatus = "Looking for ffmpeg…";
-        Ffmpeg = await _locator.LocateAsync(FfmpegPath, CancellationToken.None);
+        try
+        {
+            Ffmpeg = await _locator.LocateAsync(FfmpegPath, CancellationToken.None);
+        }
+        finally
+        {
+            FfmpegState = Ffmpeg switch
+            {
+                null => FfmpegState.Missing,
+                { HasSoxr: false } => FfmpegState.NoSoxr,
+                _ => FfmpegState.Ready,
+            };
+        }
+
         FfmpegStatus = Ffmpeg is null
             ? PlatformText.FfmpegMissing
             : $"{Ffmpeg.Description} — {Ffmpeg.Path}";

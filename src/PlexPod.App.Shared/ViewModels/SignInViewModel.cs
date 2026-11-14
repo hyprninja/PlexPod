@@ -8,7 +8,27 @@ using PlexPod.Plex.Auth;
 
 namespace PlexPod.App.ViewModels;
 
-/// <summary>Plex PIN sign-in, token persistence (DPAPI on Windows, the Keychain on macOS) and sign-out.</summary>
+/// <summary>Where sign-in stands (docs/state-machines.md §4).</summary>
+public enum SignInState
+{
+    /// <summary>Checking the saved token with plex.tv (at start-up).</summary>
+    Checking,
+
+    SignedOut,
+
+    /// <summary>Waiting for the user to approve PlexPod in the browser.</summary>
+    SigningIn,
+
+    SignedIn,
+
+    /// <summary>A saved token, but plex.tv couldn't be reached to check it. Kept; Refresh checks again.</summary>
+    Offline,
+}
+
+/// <summary>
+/// Plex PIN sign-in, token persistence (DPAPI on Windows, the Keychain on macOS) and sign-out.
+/// <see cref="State"/> is the state machine; <see cref="IsSignedIn"/> and <see cref="IsSignedOut"/> derive from it.
+/// </summary>
 public sealed partial class SignInViewModel(
     IPlexAuthService auth,
     ITokenStore tokens,
@@ -21,10 +41,14 @@ public sealed partial class SignInViewModel(
     public event EventHandler? SignedOut;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsSignedOut))]
-    public partial bool IsSignedIn { get; private set; }
+    [NotifyPropertyChangedFor(nameof(IsSignedIn), nameof(IsSignedOut))]
+    public partial SignInState State { get; private set; } = SignInState.Checking;
 
-    public bool IsSignedOut => !IsSignedIn;
+    /// <summary>A token is in use: checked (<see cref="SignInState.SignedIn"/>) or kept while plex.tv is unreachable.</summary>
+    public bool IsSignedIn => State is SignInState.SignedIn or SignInState.Offline;
+
+    /// <summary>The "Sign in with Plex" button shows: no token, or one being obtained.</summary>
+    public bool IsSignedOut => State is SignInState.SignedOut or SignInState.SigningIn;
 
     [ObservableProperty]
     public partial string? Username { get; private set; }
@@ -41,30 +65,60 @@ public sealed partial class SignInViewModel(
         var token = tokens.Load();
         if (token is null)
         {
+            State = SignInState.SignedOut;
             return false;
         }
 
-        var result = await auth.ValidateTokenAsync(token, ct);
-        switch (result.Status)
+        // Re-checking an offline sign-in keeps it in use meanwhile, so the window doesn't flicker.
+        if (State != SignInState.Offline)
         {
-            case TokenStatus.Valid:
-                Accept(token, result.Username);
-                return true;
-            case TokenStatus.Invalid:
-                logger.LogInformation("Saved Plex token was revoked; signing out");
-                tokens.Clear();
-                Status = "Your Plex sign-in expired. Please sign in again.";
-                return false;
-            default:
-                Accept(token, null);
-                Status = "Can't reach plex.tv right now. Press Refresh to retry.";
-                return true;
+            State = SignInState.Checking;
+        }
+
+        try
+        {
+            var result = await auth.ValidateTokenAsync(token, ct);
+            switch (result.Status)
+            {
+                case TokenStatus.Valid:
+                    Accept(token, result.Username, SignInState.SignedIn);
+                    Status = string.Empty;
+                    return true;
+                case TokenStatus.Invalid:
+                    logger.LogInformation("Saved Plex token was revoked; signing out");
+                    var wasInUse = IsSignedIn;
+                    tokens.Clear();
+                    tokenProvider.Set(null);
+                    Username = null;
+                    State = SignInState.SignedOut;
+                    Status = "Your Plex sign-in expired. Please sign in again.";
+                    if (wasInUse)
+                    {
+                        // It was in use offline: clear the library as Sign out does.
+                        SignedOut?.Invoke(this, EventArgs.Empty);
+                    }
+
+                    return false;
+                default:
+                    Accept(token, Username, SignInState.Offline);
+                    Status = "Can't reach plex.tv right now. Press Refresh to retry.";
+                    return true;
+            }
+        }
+        finally
+        {
+            // Cancelled or failed mid-check: never leave the window without a way to sign in.
+            if (State == SignInState.Checking)
+            {
+                State = SignInState.SignedOut;
+            }
         }
     }
 
     [RelayCommand(IncludeCancelCommand = true)]
     private async Task SignInAsync(CancellationToken ct)
     {
+        State = SignInState.SigningIn;
         try
         {
             Status = "Opening Plex in your browser…";
@@ -74,7 +128,7 @@ public sealed partial class SignInViewModel(
             var token = await auth.PollForTokenAsync(pin, ct);
             var validation = await auth.ValidateTokenAsync(token, ct);
             tokens.Save(token);
-            Accept(token, validation.Username);
+            Accept(token, validation.Username, SignInState.SignedIn);
             Status = string.Empty;
             SignedIn?.Invoke(this, EventArgs.Empty);
         }
@@ -91,6 +145,13 @@ public sealed partial class SignInViewModel(
             logger.LogWarning(ex, "Sign-in failed");
             Status = "Couldn't reach plex.tv. Check your connection and try again.";
         }
+        finally
+        {
+            if (State == SignInState.SigningIn)
+            {
+                State = SignInState.SignedOut;
+            }
+        }
     }
 
     [RelayCommand]
@@ -98,16 +159,16 @@ public sealed partial class SignInViewModel(
     {
         tokens.Clear();
         tokenProvider.Set(null);
-        IsSignedIn = false;
+        State = SignInState.SignedOut;
         Username = null;
         Status = string.Empty;
         SignedOut?.Invoke(this, EventArgs.Empty);
     }
 
-    private void Accept(string token, string? username)
+    private void Accept(string token, string? username, SignInState state)
     {
         tokenProvider.Set(token);
         Username = username;
-        IsSignedIn = true;
+        State = state;
     }
 }

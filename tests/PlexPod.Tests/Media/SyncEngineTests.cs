@@ -140,6 +140,25 @@ public sealed class SyncEngineTests : IDisposable
         Assert.Equal(db.Tracks.Count, db.Playlists[0].TrackIds.Count);
     }
 
+    /// <summary>docs/state-machines.md §6: an ffmpeg without soxr is called out in the plan, before anything is written.</summary>
+    [FfmpegFact]
+    public async Task PlanWithHiResFlac_AndNoSoxr_WarnsBeforeTheSync()
+    {
+        var (a1, _, _) = await LibraryAsync();
+        var request = await RequestAsync(Select(albumA: true));
+        var hiRes = new Dictionary<string, AudioFormat> { [a1.RatingKey] = new("flac", "flac", null, 24, 96_000) };
+        var noSoxr = request with { Ffmpeg = request.Ffmpeg with { HasSoxr = false }, FormatOverrides = hiRes };
+
+        var preview = await Engine().PreviewAsync(noSoxr, CancellationToken.None);
+        Assert.Equal(1, preview.TracksNeedingResample);
+        Assert.True(preview.MissingSoxr);
+        Assert.Contains("no soxr", PlexPod.App.ViewModels.SyncViewModel.Summarise(preview), StringComparison.Ordinal);
+
+        var withSoxr = await Engine().PreviewAsync(request with { Ffmpeg = request.Ffmpeg with { HasSoxr = true }, FormatOverrides = hiRes }, CancellationToken.None);
+        Assert.False(withSoxr.MissingSoxr);
+        Assert.DoesNotContain("no soxr", PlexPod.App.ViewModels.SyncViewModel.Summarise(withSoxr), StringComparison.Ordinal);
+    }
+
     [FfmpegFact]
     public async Task Stock_FirstSync_WritesAppleLosslessAndTheDatabase()
     {

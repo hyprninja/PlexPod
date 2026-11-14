@@ -12,10 +12,36 @@ using PlexPod.Plex.Servers;
 
 namespace PlexPod.App.ViewModels;
 
+/// <summary>Where loading the Plex library stands (docs/state-machines.md §5). <c>StatusText</c> carries the details.</summary>
+public enum LibraryStage
+{
+    SignedOut,
+    CheckingSignIn,
+    FindingServers,
+    NoServers,
+
+    /// <summary>Several servers and none remembered: the user picks one.</summary>
+    ChoosingServer,
+
+    Connecting,
+
+    /// <summary>No connection to the server answered; the manual server address can help.</summary>
+    Unreachable,
+
+    NoMusicLibrary,
+    LoadingLibrary,
+
+    /// <summary>Pickers are filled. Playlist contents may still be arriving (the summary says so).</summary>
+    Ready,
+
+    /// <summary>A Plex request failed; Refresh retries.</summary>
+    Failed,
+}
+
 /// <summary>
 /// Drives the flow: sign-in → servers → connection → music section → library → pickers, with the
 /// capacity bar recalculated (debounced) on every change, plus M2's Test export. Read-only against
-/// Plex, and never writes to the iPod.
+/// Plex, and never writes to the iPod. <see cref="Stage"/> is the state machine.
 /// </summary>
 public sealed partial class MainViewModel : ObservableObject, IDisposable
 {
@@ -139,6 +165,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     public partial string StatusText { get; private set; } = string.Empty;
 
+    /// <summary>Where loading the library stands. Set only by the load that is still current.</summary>
+    [ObservableProperty]
+    public partial LibraryStage Stage { get; private set; } = LibraryStage.SignedOut;
+
     public async Task InitializeAsync()
     {
         if (_initialized)
@@ -152,6 +182,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _ = Settings.DetectAsync();
         await RunLoadAsync(async ct =>
         {
+            Stage = LibraryStage.CheckingSignIn;
             StatusText = "Checking your Plex sign-in…";
             if (await SignIn.TryRestoreAsync(ct))
             {
@@ -159,6 +190,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             }
             else
             {
+                Stage = LibraryStage.SignedOut;
                 StatusText = "Sign in with Plex to get started.";
             }
         });
@@ -186,8 +218,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private Task RefreshAsync() =>
         RunLoadAsync(async ct =>
         {
-            if (!SignIn.IsSignedIn && !await SignIn.TryRestoreAsync(ct))
+            // Offline: check the saved token again, so the sign-in recovers once plex.tv is reachable.
+            if (SignIn.State != SignInState.SignedIn && !await SignIn.TryRestoreAsync(ct))
             {
+                Stage = LibraryStage.SignedOut;
                 StatusText = "Sign in with Plex to get started.";
                 return;
             }
@@ -236,6 +270,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or Plex.Http.PlexProtocolException or System.Text.Json.JsonException)
         {
             _logger.LogWarning(ex, "Plex request failed");
+            Stage = LibraryStage.Failed;
             StatusText = ex is TaskCanceledException
                 ? "Plex didn't answer in time. Press Refresh to retry."
                 : $"Plex request failed: {ex.Message}. Press Refresh to retry.";
@@ -251,6 +286,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     private async Task LoadServersAsync(CancellationToken ct)
     {
+        Stage = LibraryStage.FindingServers;
         StatusText = "Finding your Plex servers…";
         var servers = await _discovery.GetServersAsync(ct);
         var saved = _settings.Current.ServerMachineId;
@@ -260,12 +296,14 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
         if (servers.Count == 0)
         {
+            Stage = LibraryStage.NoServers;
             StatusText = "No Plex Media Server found on this account.";
             return;
         }
 
         if (pick is null)
         {
+            Stage = LibraryStage.ChoosingServer;
             StatusText = "Choose a server.";
             return;
         }
@@ -276,11 +314,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private async Task ConnectAsync(PlexServer server, CancellationToken ct)
     {
         ClearLibrary();
+        Stage = LibraryStage.Connecting;
         StatusText = $"Connecting to {server.Name}…";
         Server.ConnectionText = string.Empty;
         var connection = await _discovery.SelectConnectionAsync(server, Server.OverrideUri, ct);
         if (connection is null)
         {
+            Stage = LibraryStage.Unreachable;
             StatusText = $"Couldn't reach {server.Name} on your network. Check it's running, or enter its address manually.";
             return;
         }
@@ -296,6 +336,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         Server.SetSections(sections, pick);
         if (pick is null)
         {
+            Stage = LibraryStage.NoMusicLibrary;
             StatusText = $"{server.Name} has no music libraries.";
             return;
         }
@@ -309,6 +350,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         ClearLibrary();
         _library.Reset(client, null);
 
+        Stage = LibraryStage.LoadingLibrary;
         StatusText = $"Loading artists from {section.Title}…";
         var artists = await client.GetArtistsAsync(section.Key, Progress("artists"), ct);
         StatusText = "Loading albums…";
@@ -327,6 +369,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         LoadKnownSizes();
         await _settings.UpdateAsync(s => s with { SectionKey = section.Key }, ct);
         Selection.Apply(rows, _settings.Current.Selection, snapshot);
+        Stage = LibraryStage.Ready;
         StatusText = $"{section.Title}: {Format.Count(artists.Count, "artist")}, {Format.Count(albums.Count, "album")}, {Format.Count(tracks.Count, "track")}, {Format.Count(playlists.Count, "playlist")}.";
         ScheduleRecalc();
 
@@ -385,6 +428,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _library.Reset(null, null);
         Server.Clear();
         IsBusy = false;
+        Stage = LibraryStage.SignedOut;
         StatusText = "Signed out.";
     }
 

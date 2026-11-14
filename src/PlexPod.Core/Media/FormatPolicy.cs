@@ -55,4 +55,11 @@ public static class FormatPolicy
             ? FormatDecision.Copy.Instance
             : new FormatDecision.ConvertFlac(targetBits, targetRate);
     }
+
+    /// <summary>
+    /// True when converting this file lowers its sample rate, which needs ffmpeg's soxr resampler (a
+    /// bit-depth-only step doesn't). False when the format isn't known yet.
+    /// </summary>
+    public static bool NeedsResample(AudioFormat format) =>
+        Decide(format) is FormatDecision.ConvertFlac convert && format.SampleRateHz > convert.TargetRateHz;
 }

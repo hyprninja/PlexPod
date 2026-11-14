@@ -1,3 +1,4 @@
+using PlexPod.Core.Media;
 using PlexPod.Core.Models;
 using PlexPod.Core.Selection;
 using PlexPod.Core.Sync;
@@ -39,6 +40,17 @@ public sealed record SyncPreview(
     FitResult Fit,
     IReadOnlyList<string> Blockers)
 {
+    /// <summary>
+    /// Tracks to copy whose FLAC is above 44.1 kHz as Plex reports it, so converting them needs ffmpeg's soxr
+    /// resampler (unless an earlier conversion is cached). Formats Plex hasn't reported aren't counted.
+    /// </summary>
+    public int TracksNeedingResample => Plan.TrackOps.Count(o =>
+        o.Kind is TrackOpKind.Add or TrackOpKind.Replace
+        && FormatPolicy.NeedsResample(Request.FormatOverrides.GetValueOrDefault(o.Target.Track.RatingKey) ?? o.Target.Track.Format));
+
+    /// <summary>The plan holds hi-res FLAC to convert but this ffmpeg can't resample (docs/state-machines.md §6).</summary>
+    public bool MissingSoxr => !Request.Ffmpeg.HasSoxr && TracksNeedingResample > 0;
+
     /// <summary>Things noticed while planning (repaired manifest entries, ignored unsafe paths).</summary>
     public IReadOnlyList<string> Notes { get; init; } = [];
 
@@ -85,7 +97,11 @@ public sealed record SyncPreview(
     public IReadOnlyList<PlaylistEntry> UnavailableEntries => [.. Plan.PlaylistOps.SelectMany(p => p.SkippedEntries)];
 }
 
-public sealed record SyncProgress(string Phase, int Done, int Total, string Current, long BytesWritten);
+public sealed record SyncProgress(SyncPhase Phase, int Done, int Total, string Current, long BytesWritten)
+{
+    /// <summary>The phase as the user sees it.</summary>
+    public string PhaseText => Phase.Describe();
+}
 
 public sealed record SyncResult(
     bool Completed,
@@ -106,6 +122,9 @@ public sealed record SyncResult(
 {
     /// <summary>What step 0 sent to Plex; null when stats return is off or the sync stopped before it.</summary>
     public StatsResult? Stats { get; init; }
+
+    /// <summary>How the sync ended, from <see cref="Completed"/> then <see cref="Stopped"/> (docs/state-machines.md §2).</summary>
+    public SyncOutcome Outcome => Completed ? SyncOutcome.Complete : Stopped ? SyncOutcome.Stopped : SyncOutcome.FinishedWithProblems;
 }
 
 /// <summary>The iPod disappeared mid-sync. The journaled manifest lets the next sync resume.</summary>
